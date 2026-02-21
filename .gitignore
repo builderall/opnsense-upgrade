@@ -2,3 +2,6 @@
 .continue/
 __pycache__/
 *.pyc
+mcp/.env
+mcp/*.txt
+mcp/.venv/
