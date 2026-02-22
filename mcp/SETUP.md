@@ -21,8 +21,10 @@ Step-by-step instructions to prepare your OPNsense firewall and workstation for 
    - **Full name:** `Claude MCP API User`
    - **Login shell:** `/sbin/nologin`
 5. Under **Privileges**, add:
-   - `System: Firmware` — check for updates, trigger upgrades
+   - `System: Firmware` — check for updates, trigger upgrades, reboot
    - `Diagnostics: System Activity` — system uptime (used to validate reboot status)
+   - `Diagnostics: Backup & Restore` — configuration backup access
+   - `Diagnostics: System Health` — system health metrics
 6. Click **Save**
 
 ---

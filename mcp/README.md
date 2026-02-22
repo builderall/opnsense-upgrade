@@ -41,5 +41,5 @@ mcp/
 ## Requirements
 
 - Python 3.10+ on your workstation
-- OPNsense with a dedicated API user (`System: Firmware` + `Diagnostics: System Activity` privileges)
+- OPNsense with a dedicated API user — privileges: `System: Firmware`, `Diagnostics: System Activity`, `Diagnostics: Backup & Restore`, `Diagnostics: System Health`
 - Claude Code CLI or VSCode extension
