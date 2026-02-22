@@ -53,10 +53,11 @@ API_KEY=$(grep '^key=' "$KEY_FILE" | cut -d= -f2)
 API_SECRET=$(grep '^secret=' "$KEY_FILE" | cut -d= -f2)
 
 cat > .env <<EOF
-OPNSENSE_URL=https://192.168.1.1
+OPNSENSE_URL=https://192.168.1.1        # change to your firewall's IP or hostname
 OPNSENSE_API_KEY=${API_KEY}
 OPNSENSE_API_SECRET=${API_SECRET}
-OPNSENSE_VERIFY_SSL=false
+OPNSENSE_VERIFY_SSL=false               # set to true only if you have a valid SSL cert
+OPNSENSE_READ_ONLY=false                # set to true to disable update/upgrade/reboot tools
 EOF
 
 echo ".env created."
@@ -107,6 +108,8 @@ claude mcp add --scope user opnsense -- bash \
   -c "cd ~/projects/opnsense-upgrade/mcp && exec .venv/bin/python -m src.opnsense_mcp.server"
 ```
 
+**Adjust the path** (`~/projects/opnsense-upgrade/mcp`) to wherever you cloned this repo.
+
 This writes to `~/.claude.json` (used by the VSCode extension). If you are using the Claude Code CLI instead of the VSCode extension, the file is `~/.claude/settings.json` — the JSON entry format is the same either way:
 
 ```json
@@ -125,6 +128,16 @@ This writes to `~/.claude.json` (used by the VSCode extension). If you are using
 The MCP server reads credentials from `mcp/.env` automatically — no keys in the registration entry.
 
 **Note:** After registering, restart Claude Code (or reload the VSCode window) to load the server. You must also restart after any code changes to `mcp/src/`.
+
+---
+
+## Step 7: Verify
+
+After restarting, confirm the server loaded correctly by asking Claude:
+
+> "What version is my OPNsense?"
+
+Claude should call `get_version` and return the current version, FreeBSD base, and next major version. If you see an error, check the Troubleshooting section below.
 
 ---
 
@@ -159,7 +172,25 @@ Write tools require explicit user confirmation and are blocked when `OPNSENSE_RE
 - The API user has **minimal privileges** — it cannot change firewall rules or access other systems
 - To revoke Claude's access instantly: delete the API key in **System > Access > Users**
 - OPNsense logs all API calls under **System > Log Files > Audit**
-- Use `read_only: true` in the MCP config to disable write tools (update/upgrade/reboot) entirely
+- Set `OPNSENSE_READ_ONLY=true` in `mcp/.env` to disable write tools (update/upgrade/reboot) entirely
+
+---
+
+## Usage Examples
+
+Just talk to Claude naturally — no special syntax required:
+
+| What you say | What Claude does |
+|--------------|-----------------|
+| "What version is my firewall?" | Calls `get_version` |
+| "Check for updates" | Calls `check_updates` |
+| "Is my firewall ready to upgrade to 26.7?" | Calls `pre_upgrade_check` |
+| "Show me what's installed" | Calls `list_packages` |
+| "What changed in 26.1.2?" | Calls `get_changelog` with version 26.1.2 |
+| "How is my firewall doing?" | Calls `system_info` |
+| "What's happening with the upgrade?" | Calls `upgrade_status` |
+| "Apply the latest update" | Calls `run_update` (asks confirmation first) |
+| "Reboot the firewall" | Calls `reboot` (asks confirmation first) |
 
 ---
 
