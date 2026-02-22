@@ -1,15 +1,25 @@
 # OPNsense Upgrade Tools
 
-Tools for managing OPNsense firewall upgrades — from a conversational Claude MCP server to a robust SSH-based upgrade script.
+Tools for managing OPNsense firewall upgrades.
 
 **Version:** 1.1
 **License:** MIT
 
 ---
 
-## Claude MCP Server
+## Components
 
-The `mcp/` directory contains a Claude MCP server that connects Claude directly to your OPNsense firewall via its REST API. Once registered, you can manage your firewall conversationally from within Claude Code — no SSH required.
+| # | Component | Location | Use when |
+|---|-----------|----------|----------|
+| 1 | [Claude MCP Server](#1-claude-mcp-server) | `mcp/` | Day-to-day monitoring and triggering updates conversationally from Claude Code |
+| 2 | [SSH Upgrade Script](#2-ssh-upgrade-script) | `python/` | Major upgrades where the web UI falls short, or as a fallback after an MCP-triggered upgrade |
+| 3 | [Split Routing Recovery Tools](#3-split-routing-recovery-tools) | `ps1/` | Major upgrade breaks OPNsense networking — restore SSH access from a Windows machine |
+
+---
+
+## 1. Claude MCP Server
+
+Connects Claude directly to your OPNsense firewall via its REST API. Once registered, manage your firewall conversationally from within Claude Code — no SSH required.
 
 **Example usage:**
 - "Check my firewall for updates"
@@ -36,9 +46,9 @@ Write tools are blocked when `OPNSENSE_READ_ONLY=true`. See [mcp/SETUP.md](mcp/S
 
 ---
 
-## Enhanced Upgrade Script
+## 2. SSH Upgrade Script
 
-The `python/` directory contains a stateful, multi-stage upgrade script that runs directly on OPNsense via SSH. Use this for major upgrades where the web UI falls short, or as a fallback if the MCP-triggered upgrade runs into issues.
+A stateful, multi-stage upgrade script that runs directly on OPNsense via SSH. Use this for major upgrades where the web UI falls short, or as a fallback if an MCP-triggered upgrade runs into issues.
 
 ### Why Not Just Use the Web UI?
 
@@ -58,6 +68,25 @@ This script solves these problems by treating the upgrade as a **stateful, multi
 - Running in **dry-run mode by default** so you can preview every step before committing
 - **Always backing up** configuration and package list before upgrades
 - Blocking major upgrades when minor updates are pending (matching OPNsense web UI behavior)
+
+---
+
+## 3. Split Routing Recovery Tools
+
+PowerShell scripts for Windows that restore connectivity when a major OPNsense upgrade breaks networking. Sets up split routing so you can SSH into OPNsense to fix the upgrade while still having internet access.
+
+- **Wired** -> OPNsense (SSH access to resume the upgrade)
+- **WiFi** -> Internet (download packages, docs)
+
+```powershell
+.\ps1\Enable-SplitRouting-WithModule.ps1
+```
+
+Then SSH into OPNsense and resume: `./opnsense-upgrade.py -x -r`
+
+See [ps1/README.md](ps1/README.md) for details.
+
+---
 
 ## Features
 
@@ -226,21 +255,6 @@ opnsense-version                           # confirm current version
 | **Risk level** | Low | Medium |
 | **Duration** | 5-10 minutes | 15-30 minutes |
 | **Command** | `./opnsense-upgrade.py -x -m` | `./opnsense-upgrade.py -x -t 27.1` |
-
-## Recovery Tools (Windows)
-
-If a major upgrade breaks networking on OPNsense, use the PowerShell scripts in [ps1/](ps1/) to set up split routing on your Windows machine:
-
-- **Wired** -> OPNsense (SSH access to fix the upgrade)
-- **WiFi** -> Internet (download packages, docs)
-
-```powershell
-.\ps1\Enable-SplitRouting-WithModule.ps1
-```
-
-Then SSH into OPNsense and resume: `./opnsense-upgrade.py -x -r`
-
-See [ps1/README.md](ps1/README.md) for details.
 
 ## Troubleshooting
 
