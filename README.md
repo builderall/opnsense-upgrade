@@ -45,6 +45,10 @@ opnsense-upgrade/
 ├── python/
 │   ├── README.md                     # Detailed documentation
 │   └── opnsense-upgrade.py          # Main upgrade script (runs on OPNsense)
+├── mcp/
+│   ├── SETUP.md                      # MCP server setup guide
+│   ├── requirements.txt              # Python dependencies
+│   └── src/opnsense_mcp/             # MCP server package (api, tools, config, server)
 └── ps1/
     ├── README.md                     # Recovery tools documentation
     ├── Enable-SplitRouting-WithModule.ps1  # Split routing for upgrade recovery
@@ -52,6 +56,33 @@ opnsense-upgrade/
     ├── MODULE-README.md              # Module reference
     └── INSTALL-GUIDE.md              # Module installation guide
 ```
+
+## Claude MCP Server
+
+The `mcp/` directory contains a Claude MCP server that connects Claude directly to your OPNsense firewall via its REST API. Once registered, you can manage your firewall conversationally from within Claude Code.
+
+**Example usage:**
+- "Check my firewall for updates"
+- "Run a pre-upgrade health check"
+- "Show me the 26.7 changelog"
+- "Back up my config before upgrading"
+
+**Available tools:**
+
+| Tool | Type | Description |
+|------|------|-------------|
+| `get_version` | read | Current OPNsense version, FreeBSD base, next major version |
+| `check_updates` | read | Minor/major update availability and reboot status |
+| `pre_upgrade_check` | read | Pre-upgrade health assessment with go/no-go verdict |
+| `upgrade_status` | read | Monitor an in-progress upgrade |
+| `get_changelog` | read | Changelog for a specific version |
+| `list_packages` | read | Installed packages with versions |
+| `system_info` | read | Uptime, load average, top processes |
+| `run_update` | write | Trigger minor update (requires confirmation) |
+| `run_upgrade` | write | Trigger major upgrade (requires confirmation) |
+| `reboot` | write | Reboot the firewall (requires confirmation) |
+
+Write tools are blocked when `OPNSENSE_READ_ONLY=true`. See [mcp/SETUP.md](mcp/SETUP.md) for full setup instructions.
 
 ## Installation
 
@@ -253,6 +284,7 @@ tail -f /var/log/opnsense-upgrades/opnsense-*.log
 ## Documentation
 
 - [python/README.md](python/README.md) - Detailed upgrade script documentation
+- [mcp/SETUP.md](mcp/SETUP.md) - MCP server setup guide for Claude Code integration
 - [ps1/README.md](ps1/README.md) - Windows recovery tools for failed upgrades
 
 ## License

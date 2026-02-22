@@ -58,13 +58,6 @@ class OPNsenseAPI:
     def firmware_upgradestatus(self) -> dict:
         return self._get("core/firmware/upgradestatus")
 
-    # --- Backup ---
-
-    def backup_download(self) -> bytes:
-        resp = self._client.post("/api/core/backup/backup/download")
-        resp.raise_for_status()
-        return resp.content
-
     # --- Diagnostics ---
 
     def system_activity(self) -> dict:
@@ -115,6 +108,24 @@ class OPNsenseAPI:
 
         if not needs_reboot:
             return {"needs_reboot": False, "is_stale": False, "explanation": "No reboot required."}
+
+        # If no packages are pending and system is up to date, the flag is a leftover artifact
+        # from a previously applied update that was already rebooted. The UI ignores it too.
+        pending_packages = any([
+            status.get("upgrade_packages"),
+            status.get("new_packages"),
+            status.get("reinstall_packages"),
+            status.get("downgrade_packages"),
+            status.get("remove_packages"),
+        ])
+        if not pending_packages and status.get("status") == "none":
+            return {
+                "needs_reboot": True,
+                "upgrade_needs_reboot": upgrade_needs_reboot,
+                "is_stale": True,
+                "explanation": "needs_reboot is set but no packages are pending and system is up to date. "
+                               "Leftover flag from a previously applied update. Safe to ignore.",
+            }
 
         uptime = self.get_uptime_seconds()
         last_check_age = self.parse_last_check_age_seconds(last_check_str)

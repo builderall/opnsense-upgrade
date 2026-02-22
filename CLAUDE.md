@@ -41,9 +41,18 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 
 - Repo: https://github.com/builderall/opnsense-upgrade
 - Branch: master
-- Tag: v1.0 (initial release)
+- Tag: v1.0 (initial release, pushed)
 - Git user: builderall / 25215839+builderall@users.noreply.github.com (set locally, not globally)
 - Push with: `./push.sh` (uses gh CLI token, auto-creates repo if missing)
+
+### Commit History (local)
+
+| Hash | Message |
+|------|---------|
+| `43c5175` | Add MCP server for OPNsense API integration (**local only — not pushed yet**) |
+| `ad8f5b0` | Initial release: OPNsense enhanced upgrade script v1.0 (pushed, tagged v1.0) |
+
+**Note:** MCP server commit is being held locally until live testing via Claude Code session is complete.
 
 ## MCP Server
 
@@ -67,18 +76,28 @@ mcp/
 
 ### Registered in Claude Code
 
-`~/.claude/settings.json`:
+Registered via `claude mcp add` CLI (writes to `~/.claude.json`, user scope):
+
+```bash
+claude mcp add --scope user opnsense -- bash \
+  -c "cd ~/projects/opnsense-upgrade/mcp && exec .venv/bin/python -m src.opnsense_mcp.server"
+```
+
+Resulting entry in `~/.claude.json` (top-level `mcpServers`, not inside `projects`):
 ```json
 {
   "mcpServers": {
     "opnsense": {
-      "command": "~/projects/opnsense-upgrade/mcp/.venv/bin/python",
-      "args": ["-m", "src.opnsense_mcp.server"],
-      "cwd": "~/projects/opnsense-upgrade/mcp"
+      "type": "stdio",
+      "command": "bash",
+      "args": ["-c", "cd ~/projects/opnsense-upgrade/mcp && exec .venv/bin/python -m src.opnsense_mcp.server"],
+      "env": {}
     }
   }
 }
 ```
+
+Note: `~/.claude/settings.json` is for the Claude Code CLI only — the VSCode extension uses `~/.claude.json`.
 
 ### Available Tools
 
@@ -89,11 +108,11 @@ mcp/
 | `upgrade_status` | read | Monitor in-progress upgrade |
 | `get_changelog` | read | Changelog for a specific version |
 | `list_packages` | read | Installed packages with versions |
-| `get_config_backup` | read | Download config XML, return summary |
 | `system_info` | read | Uptime, load average, top processes |
 | `run_update` | write | Trigger minor update (requires user confirmation) |
 | `run_upgrade` | write | Trigger major upgrade (requires user confirmation) |
 | `reboot` | write | Reboot firewall (requires user confirmation) |
+| `pre_upgrade_check` | read | Pre-upgrade health assessment: pending minor updates, reboot status, in-progress detection, py37 packages, go/no-go verdict |
 
 Write tools are blocked when `OPNSENSE_READ_ONLY=true` in `.env`.
 
@@ -101,16 +120,21 @@ Write tools are blocked when `OPNSENSE_READ_ONLY=true` in `.env`.
 
 Privileges required:
 - `System: Firmware` — firmware status, update, upgrade
-- `Diagnostics: Backup & Restore` — config XML download
 - `Diagnostics: System Activity` — uptime via `POST /api/diagnostics/activity/getActivity`
-- `Diagnostics: System Health` — health metrics
 
 ### Pending MCP Work
 
-- First live test via Claude Code session (start new session, MCP server auto-loads)
-- Verify `~/` path expansion works in `settings.json` command/cwd fields (untested)
-- Test write tools (`run_update`, `run_upgrade`, `reboot`) — need careful testing with real upgrade
-- Add mcp/README.md once live testing is done
+1. **Test write tools** (`run_update`, `run_upgrade`, `reboot`) — guards verified working; actual execution pending a real upgrade (26.1.3 or 26.7 when released).
+2. **Add mcp/README.md** — user-facing README for the mcp/ directory.
+
+### Completed MCP Work
+
+- Live tested all 10 read tools against OPNsense 26.1.2 via Claude Code VSCode session — all working.
+- `check_services` and `get_config_backup` removed — both require admin-level API access not grantable via restricted keys.
+- Path expansion confirmed — `~` expands correctly in `bash -c "cd ~/..."` args.
+- mcp/.env URL confirmed — `https://192.168.1.1` working.
+- Error handling added — graceful messages for ConnectError, TimeoutException, HTTPStatusError.
+- Safety guards on write tools — blocks duplicate runs, pending minor updates before major upgrade, unreleased versions.
 
 ## Testing Status (python script)
 
@@ -121,7 +145,10 @@ Privileges required:
 
 ## MCP API Notes
 
-- `needs_reboot: 1` in firmware status after 26.1.2 upgrade: genuine (not stale) — firmware daemon ran post-reboot and still reports it. Router requires a second reboot to clear this flag. Safe to use, just needs reboot.
-- Reboot staleness logic in `api.py`: compare uptime vs last_check_age. If `uptime > last_check_age`, boot happened before last check => flag is genuine. If `uptime < last_check_age`, check predates this boot => flag is stale.
+- `needs_reboot: 1` in firmware status after 26.1.2 upgrade: **leftover artifact** — UI shows no reboot needed. The flag persists in the cached API response even after the reboot. Fixed in `api.py`: if no packages are pending and `status == 'none'`, flag is treated as stale regardless of timing.
+- Reboot staleness logic in `api.py` (two-stage): (1) if no pending packages + `status == 'none'` => leftover artifact, safe to ignore; (2) else compare uptime vs last_check_age — if `uptime < last_check_age`, check predates this boot => stale; if `uptime > last_check_age`, daemon ran after boot => genuine.
 - `GET` requests to diagnostics endpoints return 401; use `POST` for `getActivity` and similar.
 - `CORE_NEXT: 26.7` confirmed in firmware status API — next major version detection works.
+- Error handling in `tools.py` `call_tool`: top-level `try/except` catches `httpx.ConnectError` (firewall unreachable), `httpx.TimeoutException`, `httpx.HTTPStatusError` (4xx/5xx with status code), and general `Exception`. `ValueError` is re-raised so read-only blocks and unknown-tool errors surface normally to the MCP caller.
+- `check_services` removed: `POST /api/core/service/search` returns 403 for all restricted API keys — OPNsense does not expose a grantable privilege for this endpoint. Service checking requires SSH/root access (handled by the python script instead).
+- `get_config_backup` removed: `GET /api/core/backup/download/this` returns 403 even with `Diagnostics: Backup & Restore` privilege — OPNsense restricts backup download to admin-level access only.

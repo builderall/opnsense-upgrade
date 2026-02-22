@@ -1,5 +1,7 @@
 # MCP Server Plan: OPNsense Upgrade Assistant for Claude
 
+> **Status: Implemented.** This document is the original design plan. The MCP server is built and working. See [mcp/SETUP.md](mcp/SETUP.md) for setup instructions.
+
 ## Overview
 
 Build an MCP (Model Context Protocol) server that connects Claude to your OPNsense firewall via its REST API. This lets you manage upgrades conversationally — "check for updates", "back up my config", "show upgrade logs" — without giving Claude shell access.
@@ -30,34 +32,33 @@ Claude Code ←→ MCP Server (Python) ←→ OPNsense REST API (HTTPS)
 2. Create a dedicated API user (e.g., `claude-mcp`)
 3. Generate an **API key + secret** pair
 4. Assign minimal privileges:
-   - `Firmware` — read status, trigger updates
-   - `Backup` — download configuration
-   - Optionally: `Diagnostics` — read logs, service status
+   - `System: Firmware` — read status, trigger updates
+   - `Diagnostics: System Activity` — uptime and process info
 
 API docs: `https://<your-opnsense>/api/core/firmware`
 
-## MCP Tools to Implement
+## MCP Tools
 
 ### Read-Only Tools (no confirmation needed)
 
-| Tool | Description | OPNsense API Endpoint |
-|------|-------------|----------------------|
-| `check_updates` | Check for available minor and major updates | `GET /api/core/firmware/status` |
-| `get_version` | Get current OPNsense version and FreeBSD base | `GET /api/core/firmware/info` |
-| `upgrade_status` | Monitor an in-progress upgrade | `GET /api/core/firmware/upgradestatus` |
-| `get_changelog` | Show changelog for available update | `GET /api/core/firmware/changelog/<version>` |
-| `list_packages` | List installed packages | `GET /api/core/firmware/info` |
-| `get_config_backup` | Download current configuration XML | `POST /api/core/backup/backup/download` |
-| `check_services` | Check status of critical services | `GET /api/core/service/search` |
-| `get_audit_log` | View recent firmware activity log | `GET /api/core/firmware/audit` |
+| Tool | Description | OPNsense API Endpoint | Status |
+|------|-------------|----------------------|--------|
+| `check_updates` | Check for available minor and major updates | `GET /api/core/firmware/status` | Implemented |
+| `get_version` | Get current OPNsense version and FreeBSD base | `GET /api/core/firmware/status` | Implemented |
+| `upgrade_status` | Monitor an in-progress upgrade | `GET /api/core/firmware/upgradestatus` | Implemented |
+| `get_changelog` | Show changelog for a specific version | `POST /api/core/firmware/changelog/<version>` | Implemented |
+| `list_packages` | List installed packages | `POST /api/core/firmware/info` (with status fallback) | Implemented |
+| `system_info` | Uptime, load average, top processes | `POST /api/diagnostics/activity/getActivity` | Implemented |
+| `pre_upgrade_check` | Pre-upgrade health assessment with go/no-go verdict | Multiple endpoints | Implemented |
+| `get_audit_log` | View recent firmware activity log | `GET /api/core/firmware/audit` | Not implemented |
 
 ### Write Tools (require user confirmation)
 
-| Tool | Description | OPNsense API Endpoint |
-|------|-------------|----------------------|
-| `run_update` | Trigger a minor update | `POST /api/core/firmware/update` |
-| `run_upgrade` | Trigger a major upgrade | `POST /api/core/firmware/upgrade` |
-| `reboot` | Reboot the firewall | `POST /api/core/firmware/reboot` |
+| Tool | Description | OPNsense API Endpoint | Status |
+|------|-------------|----------------------|--------|
+| `run_update` | Trigger a minor update (blocked if already up to date or upgrade running) | `POST /api/core/firmware/update` | Implemented |
+| `run_upgrade` | Trigger a major upgrade (blocked if minor updates pending or upgrade running) | `POST /api/core/firmware/upgrade` | Implemented |
+| `reboot` | Reboot the firewall | `POST /api/core/firmware/reboot` | Implemented |
 
 ## Project Structure
 
@@ -94,24 +95,14 @@ The MCP server reads config from environment variables or a config file:
 
 ## Claude Code Integration
 
-Register the MCP server in `.claude/settings.json`:
+Register with the `claude mcp add` CLI (see [mcp/SETUP.md](mcp/SETUP.md) for full instructions):
 
-```json
-{
-  "mcpServers": {
-    "opnsense": {
-      "command": "python",
-      "args": ["-m", "opnsense_mcp.server"],
-      "cwd": "/path/to/opnsense-upgrade/mcp",
-      "env": {
-        "OPNSENSE_URL": "https://192.168.1.1",
-        "OPNSENSE_API_KEY": "your-key",
-        "OPNSENSE_API_SECRET": "your-secret"
-      }
-    }
-  }
-}
+```sh
+claude mcp add --scope user opnsense -- bash \
+  -c "cd ~/projects/opnsense-upgrade/mcp && exec .venv/bin/python -m src.opnsense_mcp.server"
 ```
+
+Credentials are read from `mcp/.env` automatically — no keys in the registration entry.
 
 ## Auditing & Safety
 
@@ -121,6 +112,7 @@ Register the MCP server in `.claude/settings.json`:
 - **User confirmation** — Write tools (update, upgrade, reboot) require explicit user approval via Claude Code's permission system
 - **API key scoping** — OPNsense API keys can be restricted to specific endpoints
 - **Revocable access** — Delete the API key in OPNsense to instantly revoke Claude's access
+- **Graceful error handling** — Network errors (`ConnectError`, `TimeoutException`), HTTP errors (`HTTPStatusError`), and unexpected exceptions are caught and returned as descriptive messages to Claude rather than crashing the tool call
 
 ### Audit Trail
 

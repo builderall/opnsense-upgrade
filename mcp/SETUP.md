@@ -22,9 +22,7 @@ Step-by-step instructions to prepare your OPNsense firewall and workstation for 
    - **Login shell:** `/sbin/nologin`
 5. Under **Privileges**, add:
    - `System: Firmware` — check for updates, trigger upgrades
-   - `Diagnostics: Backup & Restore` — download configuration backup
    - `Diagnostics: System Activity` — system uptime (used to validate reboot status)
-   - `Diagnostics: System Health` — system health metrics
 6. Click **Save**
 
 ---
@@ -102,21 +100,56 @@ Dependencies:
 
 ## Step 6: Register with Claude Code
 
-Add the MCP server to your Claude Code settings at `~/.claude/settings.json`:
+The recommended way is the `claude mcp add` CLI command, which writes the entry automatically:
+
+```sh
+claude mcp add --scope user opnsense -- bash \
+  -c "cd ~/projects/opnsense-upgrade/mcp && exec .venv/bin/python -m src.opnsense_mcp.server"
+```
+
+This writes to `~/.claude.json` (used by the VSCode extension). If you are using the Claude Code CLI instead of the VSCode extension, the file is `~/.claude/settings.json` — the JSON entry format is the same either way:
 
 ```json
 {
   "mcpServers": {
     "opnsense": {
-      "command": "~/projects/opnsense-upgrade/mcp/.venv/bin/python",
-      "args": ["-m", "src.opnsense_mcp.server"],
-      "cwd": "~/projects/opnsense-upgrade/mcp"
+      "type": "stdio",
+      "command": "bash",
+      "args": ["-c", "cd ~/projects/opnsense-upgrade/mcp && exec .venv/bin/python -m src.opnsense_mcp.server"],
+      "env": {}
     }
   }
 }
 ```
 
-The MCP server reads credentials from `mcp/.env` automatically — no keys in `settings.json`.
+The MCP server reads credentials from `mcp/.env` automatically — no keys in the registration entry.
+
+**Note:** After registering, restart Claude Code (or reload the VSCode window) to load the server. You must also restart after any code changes to `mcp/src/`.
+
+---
+
+## Available Tools
+
+Once registered, the following tools are available in Claude:
+
+| Tool | Type | Description |
+|------|------|-------------|
+| `get_version` | read | Current OPNsense version, FreeBSD base, next major version |
+| `check_updates` | read | Minor/major update availability and reboot status |
+| `pre_upgrade_check` | read | Pre-upgrade health assessment: pending minor updates, reboot status, in-progress detection, go/no-go verdict |
+| `upgrade_status` | read | Monitor an in-progress firmware update or upgrade |
+| `get_changelog` | read | Changelog for a specific OPNsense version |
+| `list_packages` | read | All installed packages with versions |
+| `system_info` | read | Uptime, load average, and top processes |
+| `run_update` | write | Trigger a minor firmware update |
+| `run_upgrade` | write | Trigger a major version upgrade |
+| `reboot` | write | Reboot the firewall |
+
+Write tools require explicit user confirmation and are blocked when `OPNSENSE_READ_ONLY=true` in `mcp/.env`.
+
+**Safety guards on write tools:**
+- `run_update` — blocked if system is already up to date or an upgrade is already running
+- `run_upgrade` — blocked if minor updates are pending (must apply those first) or an upgrade is already running
 
 ---
 
@@ -139,6 +172,10 @@ The MCP server reads credentials from `mcp/.env` automatically — no keys in `s
 ### SSL certificate error
 - Set `OPNSENSE_VERIFY_SSL=false` if using a self-signed certificate (default for most OPNsense installs)
 
-### Connection refused
+### Connection refused / firewall unreachable
 - Confirm your workstation can reach the OPNsense IP on port 443
 - Check that the OPNsense web UI is enabled on the LAN interface
+- The MCP server returns a descriptive error to Claude rather than crashing:
+  - Unreachable: `Cannot connect to OPNsense. Check that the firewall is reachable and the URL in mcp/.env is correct.`
+  - Timeout: `Request to OPNsense timed out. The firewall may be busy or unreachable.`
+  - HTTP error: `OPNsense API error: HTTP 401. Check that the API key has the required privileges.`
