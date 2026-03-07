@@ -17,7 +17,7 @@ A Claude MCP server that connects Claude Code directly to your OPNsense firewall
 | `get_changelog` | read | Changelog for a specific version |
 | `list_packages` | read | Installed packages with versions |
 | `system_info` | read | Uptime, load average, top processes |
-| `run_update` | write | Trigger minor update (requires confirmation) |
+| `run_update` | write | Trigger minor update (requires confirmation) — may reboot if kernel/base packages are updated |
 | `run_upgrade` | write | Trigger major upgrade (requires confirmation) |
 | `reboot` | write | Reboot the firewall (requires confirmation) |
 

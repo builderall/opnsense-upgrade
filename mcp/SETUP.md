@@ -156,7 +156,7 @@ Once registered, the following tools are available in Claude:
 | `get_changelog` | read | Changelog for a specific OPNsense version |
 | `list_packages` | read | All installed packages with versions |
 | `system_info` | read | Uptime, load average, and top processes |
-| `run_update` | write | Trigger a minor firmware update |
+| `run_update` | write | Trigger a minor firmware update — may reboot if kernel/base packages are updated |
 | `run_upgrade` | write | Trigger a major version upgrade |
 | `reboot` | write | Reboot the firewall |
 
@@ -165,6 +165,8 @@ Write tools require explicit user confirmation and are blocked when `OPNSENSE_RE
 **Safety guards on write tools:**
 - `run_update` — blocked if system is already up to date or an upgrade is already running
 - `run_upgrade` — blocked if minor updates are pending (must apply those first) or an upgrade is already running
+
+**Note on reboots:** The "Reboot status: not required" shown by `check_updates` reflects the *current* state — it means no reboot is pending from a previous operation. It does not predict whether the upcoming update will reboot the system. If the update includes kernel or base packages, OPNsense will reboot automatically mid-update. Expect a connection loss of 2-5 minutes and confirm with `get_version` once the firewall is back.
 
 ---
 
