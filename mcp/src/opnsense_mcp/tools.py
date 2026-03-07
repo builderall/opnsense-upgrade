@@ -218,9 +218,16 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 running = api.firmware_upgradestatus()
                 if running.get("status") == "running":
                     return text("An upgrade/update is already in progress. Use upgrade_status to monitor it.")
-                # Block if already up to date
+                # Block if already up to date — use same two-condition logic as check_updates
+                # to handle stale firmware daemon cache (status="none" but product_latest > product_version)
                 status = api.firmware_status()
-                if status.get("status") == "none":
+                product = status.get("product", {})
+                current = product.get("product_version", "")
+                latest_minor = product.get("product_latest", "")
+                fw_status = status.get("status", "none")
+                current_base = current.split("_")[0] if current else ""
+                has_update = fw_status == "update" or (latest_minor and latest_minor != current_base)
+                if not has_update:
                     return text("System is already up to date. No update needed.")
                 result = api.firmware_update()
                 msg = result.get("msg", "") or result.get("status", str(result))
