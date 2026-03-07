@@ -4,6 +4,7 @@ Tools for managing OPNsense firewall upgrades.
 
 **Version:** 1.1
 **License:** MIT
+
 **Write-up:** [I gave Claude access to my OPNsense firewall — here's what happened](https://dev.to/builderall_uniq/i-gave-claude-access-to-my-opnsense-firewall-heres-what-happened-nif)
 
 ---
