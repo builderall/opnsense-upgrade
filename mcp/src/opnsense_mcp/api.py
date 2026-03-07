@@ -118,7 +118,14 @@ class OPNsenseAPI:
             status.get("downgrade_packages"),
             status.get("remove_packages"),
         ])
-        if not pending_packages and status.get("status") == "none":
+        product = status.get("product", {})
+        current_ver = product.get("product_version", "").split("_")[0]
+        latest_ver = product.get("product_latest", "").split("_")[0]
+        versions_match = bool(current_ver and latest_ver and current_ver == latest_ver)
+        # Also treat as stale if current == latest even when status != "none" —
+        # this catches the post-update-reboot window where the firmware daemon
+        # hasn't refreshed yet and status is still transitional.
+        if not pending_packages and (status.get("status") == "none" or versions_match):
             return {
                 "needs_reboot": True,
                 "upgrade_needs_reboot": upgrade_needs_reboot,
