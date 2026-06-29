@@ -418,6 +418,16 @@ ls -lh /var/log/opnsense-upgrades/
 tail -f /var/log/opnsense-upgrades/opnsense-*.log
 ```
 
+## Tests
+
+Regression tests for the hang-prevention logic (command idle-timeout and repo
+reachability) live in `test_shell.py`. They use only stdlib — no network or
+OPNsense access required:
+
+```sh
+python3 python/test_shell.py
+```
+
 ## Best Practices
 
 1. **Always test with dry-run first** - Run without `-x` to preview
