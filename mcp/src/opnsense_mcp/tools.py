@@ -97,6 +97,31 @@ def _repo_error(status: dict) -> str | None:
     return None
 
 
+def _version_state(status: dict) -> dict:
+    """Firmware-version fields shared by the update/upgrade/check handlers.
+
+    has_minor is True when a minor update is pending (status 'update', or a
+    product_latest that differs from the suffix-stripped current version).
+    """
+    product = status.get("product", {})
+    current = product.get("product_version", "")
+    latest_minor = product.get("product_latest", "")
+    current_base = current.split("_")[0] if current else ""
+    fw_status = status.get("status", "none")
+    has_minor = fw_status == "update" or bool(
+        latest_minor and current_base and latest_minor != current_base
+    )
+    return {
+        "product": product,
+        "current": current,
+        "latest_minor": latest_minor,
+        "next_major": product.get("CORE_NEXT", ""),
+        "current_base": current_base,
+        "fw_status": fw_status,
+        "has_minor": has_minor,
+    }
+
+
 def _repo_blocked_text(status_msg: str) -> str:
     """Guidance shown when a write tool refuses because a repo is unreachable."""
     return (
@@ -216,7 +241,13 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     return text(f"No changelog found for version {version}.")
                 clean = re.sub(r"<[^>]+>", "", html).strip()
                 clean = re.sub(r"\n{3,}", "\n\n", clean)
-                return text(f"Changelog for {version}:\n\n{clean[:4000]}")
+                limit = 4000
+                if len(clean) > limit:
+                    clean = clean[:limit].rstrip() + (
+                        f"\n\n... [truncated {len(clean) - limit} more characters; "
+                        "see the full changelog in the OPNsense web UI]"
+                    )
+                return text(f"Changelog for {version}:\n\n{clean}")
 
             elif name == "list_packages":
                 # firmware_info (POST) forces a fresh fetch; fall back to cached status if needed
@@ -278,13 +309,7 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 rerr = _repo_error(status)
                 if rerr:
                     return text(_repo_blocked_text(rerr))
-                product = status.get("product", {})
-                current = product.get("product_version", "")
-                latest_minor = product.get("product_latest", "")
-                fw_status = status.get("status", "none")
-                current_base = current.split("_")[0] if current else ""
-                has_update = fw_status == "update" or (latest_minor and latest_minor != current_base)
-                if not has_update:
+                if not _version_state(status)["has_minor"]:
                     return text("System is already up to date. No update needed.")
                 result = api.firmware_update()
                 msg = result.get("msg", "") or result.get("status", str(result))
@@ -302,12 +327,9 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 rerr = _repo_error(status)
                 if rerr:
                     return text(_repo_blocked_text(rerr))
-                product = status.get("product", {})
-                current = product.get("product_version", "")
-                latest_minor = product.get("product_latest", "")
-                next_major = product.get("CORE_NEXT", "")
-                fw_status = status.get("status", "none")
-                current_base = current.split("_")[0] if current else ""
+                vs = _version_state(status)
+                current, latest_minor = vs["current"], vs["latest_minor"]
+                next_major, fw_status = vs["next_major"], vs["fw_status"]
 
                 # Block if the major upgrade is not actually available on the mirror yet
                 if fw_status != "upgrade":
@@ -320,10 +342,7 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     return text("No major upgrade is available. System is up to date.")
 
                 # Block if minor updates are pending (must apply minor updates before major upgrade)
-                has_minor = fw_status == "update" or (
-                    latest_minor and current_base and latest_minor != current_base
-                )
-                if has_minor:
+                if vs["has_minor"]:
                     return text(
                         f"Minor update pending: {current} -> {latest_minor}\n\n"
                         "OPNsense requires all minor updates to be applied before a major upgrade. "
@@ -346,12 +365,12 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
 
                 # Firmware status (single call, reused below)
                 status = api.firmware_status()
-                product = status.get("product", {})
-                current = product.get("product_version", "unknown")
-                latest_minor = product.get("product_latest", "")
-                next_major = product.get("CORE_NEXT", "")
-                fw_status = status.get("status", "none")
-                current_base = current.split("_")[0] if current else ""
+                vs = _version_state(status)
+                current = vs["current"] or "unknown"
+                latest_minor = vs["latest_minor"]
+                next_major = vs["next_major"]
+                fw_status = vs["fw_status"]
+                has_minor = vs["has_minor"]
 
                 lines.append(f"Current version: {current}")
 
@@ -368,9 +387,6 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     )
 
                 # Minor updates pending?
-                has_minor = fw_status == "update" or (
-                    latest_minor and current_base and latest_minor != current_base
-                )
                 if has_minor:
                     lines.append(f"Minor update:    {latest_minor} -- PENDING (must apply before major upgrade)")
                     issues.append(f"Minor update pending ({current} -> {latest_minor}). Run run_update first.")
