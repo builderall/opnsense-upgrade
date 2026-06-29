@@ -80,6 +80,35 @@ TOOLS = [
 ]
 
 
+def _repo_error(status: dict) -> str | None:
+    """Return status_msg when it signals an unreachable/missing pkg repo, else None.
+
+    An unreachable repo (e.g. a third-party SunnyValley/Zenarmor mirror) makes pkg
+    hang on the catalog fetch before installing anything. Matches the error signature
+    ("repositor" + an error word) without false-flagging benign messages like
+    "no updates available on the selected mirror".
+    """
+    msg = status.get("status_msg", "") or ""
+    low = msg.lower()
+    if "repositor" in low and any(
+        w in low for w in ("could not", "not found", "unable", "fail", "unreachable", "error")
+    ):
+        return msg
+    return None
+
+
+def _repo_blocked_text(status_msg: str) -> str:
+    """Guidance shown when a write tool refuses because a repo is unreachable."""
+    return (
+        "Blocked: a configured pkg repository is unreachable.\n"
+        f"  {status_msg}\n\n"
+        "pkg fetches every repo's catalog before installing, so this would hang. "
+        "Disable the offending third-party repo on the firewall (e.g. "
+        "SunnyValley/Zenarmor), then retry:\n"
+        "  mv /usr/local/etc/pkg/repos/SunnyValley.conf{,.disabled}"
+    )
+
+
 def register_tools(server: Server, config: Config) -> OPNsenseAPI:
     api = OPNsenseAPI(config)
 
@@ -166,6 +195,17 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 if log_lines:
                     lines.append("\nLog (last 20 lines):")
                     lines.extend(log_lines.strip().splitlines()[-20:])
+                # A "running" status with an unreachable repo is the classic stall:
+                # pkg blocks on the catalog fetch and the log stops advancing.
+                if fw_status == "running":
+                    rerr = _repo_error(api.firmware_status())
+                    if rerr:
+                        lines.append(
+                            f"\nWARNING: a pkg repository is unreachable ({rerr}). The run is "
+                            "likely stalled on the catalog fetch. If the log is not advancing, it "
+                            "may need manual recovery on the firewall: kill the stuck pkg process, "
+                            "disable the offending repo, then retry."
+                        )
                 return text("\n".join(lines))
 
             elif name == "get_changelog":
@@ -234,6 +274,10 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 # Block if already up to date — use same two-condition logic as check_updates
                 # to handle stale firmware daemon cache (status="none" but product_latest > product_version)
                 status = api.firmware_status()
+                # Refuse if a repo is unreachable — triggering would hang on the catalog fetch
+                rerr = _repo_error(status)
+                if rerr:
+                    return text(_repo_blocked_text(rerr))
                 product = status.get("product", {})
                 current = product.get("product_version", "")
                 latest_minor = product.get("product_latest", "")
@@ -254,6 +298,10 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     return text("An upgrade/update is already in progress. Use upgrade_status to monitor it.")
                 # Check firmware status before proceeding
                 status = api.firmware_status()
+                # Refuse if a repo is unreachable — triggering would hang on the catalog fetch
+                rerr = _repo_error(status)
+                if rerr:
+                    return text(_repo_blocked_text(rerr))
                 product = status.get("product", {})
                 current = product.get("product_version", "")
                 latest_minor = product.get("product_latest", "")
@@ -303,7 +351,6 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 latest_minor = product.get("product_latest", "")
                 next_major = product.get("CORE_NEXT", "")
                 fw_status = status.get("status", "none")
-                status_msg = status.get("status_msg", "")
                 current_base = current.split("_")[0] if current else ""
 
                 lines.append(f"Current version: {current}")
@@ -311,15 +358,11 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 # Repository/mirror reachability — an unreachable repo (e.g. a third-party
                 # Zenarmor/SunnyValley mirror) makes pkg hang on the catalog fetch. OPNsense
                 # surfaces this in status_msg; flag it so the verdict reflects the real risk.
-                msg_lc = status_msg.lower()
-                repo_error = "repositor" in msg_lc and any(
-                    w in msg_lc for w in
-                    ("could not", "not found", "unable", "fail", "unreachable", "error")
-                )
-                if repo_error:
-                    lines.append(f"Repository:      UNREACHABLE -- {status_msg}")
+                rerr = _repo_error(status)
+                if rerr:
+                    lines.append(f"Repository:      UNREACHABLE -- {rerr}")
                     issues.append(
-                        f"A configured pkg repository is unreachable ({status_msg}). "
+                        f"A configured pkg repository is unreachable ({rerr}). "
                         "pkg will hang on the catalog fetch. Disable the offending "
                         "third-party repo (e.g. SunnyValley/Zenarmor) before updating."
                     )

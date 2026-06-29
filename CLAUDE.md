@@ -138,6 +138,7 @@ Privileges required:
 - mcp/README.md added — user-facing README for the mcp/ directory.
 - `system_info` columns fixed — `getActivity` (top `-aHSTn` thread mode) exposes `WCPU` and `RES`, not `%CPU`/`%MEM`, so both columns were always blank. CPU% now falls back through `%CPU`/`WCPU`/`CPU`/`C`; the memory column falls back through `%MEM`/`MEM`/`RES`/`SIZE` and is relabeled `RES` (resident size, e.g. eastpect at 284M). Verified live on 26.1.10.
 - `pre_upgrade_check` now flags an unreachable pkg repo (via `status_msg`) as a NOT-READY issue — see the SunnyValley/Zenarmor incident note below.
+- Write tools now refuse on an unreachable repo — `run_update`/`run_upgrade` call shared `_repo_error()` and return `_repo_blocked_text()` instead of triggering a doomed (hanging) run; `upgrade_status` appends a stall warning when a `running` status coincides with a repo error. Repo-error detection is now one shared helper used by all four (was inline in `pre_upgrade_check`).
 
 ## Testing Status (python script)
 
