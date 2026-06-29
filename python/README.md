@@ -420,13 +420,34 @@ tail -f /var/log/opnsense-upgrades/opnsense-*.log
 
 ## Tests
 
-Regression tests for the hang-prevention logic (command idle-timeout and repo
-reachability) live in `test_shell.py`. They use only stdlib — no network or
-OPNsense access required:
+**Unit tests** (`test_shell.py`) cover the hang-prevention logic (command
+idle-timeout and repo reachability). Stdlib only — no network or OPNsense
+access required:
 
 ```sh
 python3 python/test_shell.py
 ```
+
+**Live firewall tests** (`test-on-firewall.sh`) exercise the script's read-only
+and dry-run paths (repo reachability, mirror validation, resume detection,
+backup) plus the unit tests against a real OPNsense over SSH. It uses an SSH
+ControlMaster socket so you authenticate once; if the socket is not open the
+script prints the exact command to open it.
+
+```sh
+# 1. In your terminal, open a master connection (prompts for the root
+#    password once; stays alive 1 hour):
+ssh -M -S /tmp/opnsense.sock -o ControlPersist=1h -fN root@192.168.1.1
+
+# 2. Run the suite (override target with FW_HOST=...):
+./python/test-on-firewall.sh
+
+# Optional: scp the local script to the firewall first
+./python/test-on-firewall.sh --deploy
+```
+
+All tests are read-only or dry-run except `-b`, which only writes a config
+backup. Output is teed to `python/logs/` (gitignored).
 
 ## Best Practices
 
