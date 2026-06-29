@@ -2,7 +2,7 @@
 
 Python 3 OOP implementation of the OPNsense multi-stage upgrade script. Uses only stdlib modules — no pip dependencies.
 
-**Version:** 1.0
+**Version:** 1.3
 **License:** MIT
 
 ## Features

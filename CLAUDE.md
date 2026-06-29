@@ -19,7 +19,7 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 
 ## Conventions
 
-- Version: 1.0 (first release, tagged v1.0 on GitHub)
+- Version: 1.3 (tagged v1.3 on GitHub; first release was v1.0)
 - Dry-run by default, `-x` to execute
 - Keep READMEs in each subdirectory
 - No emojis in code or docs
@@ -41,7 +41,7 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 
 - Repo: https://github.com/builderall/opnsense-upgrade
 - Branch: master
-- Tag: v1.0 (initial release, pushed)
+- Tags: v1.0 (initial) through v1.3 (latest)
 - Git user: builderall / 25215839+builderall@users.noreply.github.com (set locally, not globally)
 - Push with: `./push.sh` (uses gh CLI token, auto-creates repo if missing)
 

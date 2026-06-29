@@ -12,7 +12,7 @@ Features:
 - Supports both minor updates (26.1.1 -> 26.1.2) and major upgrades (26.1 -> 27.1)
 - Shows help by default for safety (use -l to check versions, -x to execute)
 
-Version: 1.0 | License: MIT
+Version: 1.3 | License: MIT
 """
 
 import argparse
@@ -1043,7 +1043,7 @@ class OPNsenseUpgrade:
 
     def run_upgrade(self):
         mode = " [DRY RUN]" if self.dry_run else ""
-        self.log.header(f"OPNsense Enhanced Upgrade v1.0{mode}")
+        self.log.header(f"OPNsense Enhanced Upgrade v1.3{mode}")
         self.log.info(f"Target version: {self.target}")
         self.log.info(f"Starting from stage: {Stage.name(self.current_stage)}")
 
