@@ -114,7 +114,9 @@ follow_log() {
             seen="$total"
         fi
         pid="$(rcmd "cat $pidfile" 2>/dev/null)"
-        if [ -n "$pid" ] && ! rcmd "kill -0 $pid" 2>/dev/null; then
+        # Wrap in remote sh: tcsh's kill writes "No such process" to stdout,
+        # which a local 2>/dev/null would not suppress.
+        if [ -n "$pid" ] && ! rcmd "sh -c 'kill -0 $pid 2>/dev/null'" 2>/dev/null; then
             rcmd "sed -n '$((seen + 1)),\$p' $log" | strip
             rcmd "rm -f $pidfile" 2>/dev/null
             echo
@@ -158,12 +160,16 @@ fi
 
 # --- Real run: confirm, then launch DETACHED with -f and follow the log ---
 if [ "$YES" -eq 0 ]; then
-    if [ -r /dev/tty ]; then
-        printf 'About to perform a REAL %s on %s. Type "yes" to proceed: ' "$DESC" "$FW_HOST" > /dev/tty
-        read -r ans < /dev/tty
+    ans=""
+    # Open the controlling terminal directly; this fails (and we refuse) when
+    # there is no interactive TTY, so a real upgrade never proceeds unconfirmed.
+    if { exec 3<>/dev/tty; } 2>/dev/null; then
+        printf 'About to perform a REAL %s on %s. Type "yes" to proceed: ' "$DESC" "$FW_HOST" >&3
+        IFS= read -r ans <&3 || ans=""
+        exec 3>&- 2>/dev/null || true
         [ "$ans" = "yes" ] || { echo "Aborted."; exit 1; }
     else
-        echo "Refusing a real upgrade without confirmation (no TTY). Re-run with --yes."
+        echo "Refusing a real upgrade without an interactive terminal. Re-run with --yes."
         exit 1
     fi
 fi
