@@ -16,16 +16,19 @@ Version: 1.0 | License: MIT
 """
 
 import argparse
+import glob
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import sys
 import time
 from datetime import datetime
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import urlopen
-from urllib.error import URLError
 
 
 # ==========================================================================
@@ -139,37 +142,44 @@ class Shell:
             self.log.error(f"Command timed out: {cmd}")
             return False
 
-    def run_tee(self, cmd):
+    def run_tee(self, cmd, idle_timeout=1800):
         """Run command streaming output to console and log. Respects dry-run."""
-        if self.dry_run:
-            self.log.info(f"[DRY RUN] Would run: {cmd}")
-            return True
-        self.log.info(f"Running: {cmd}")
-        try:
-            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            with open(self.log.log_file, "a") as f:
-                for line in proc.stdout:
-                    decoded = line.decode("utf-8", errors="replace")
-                    sys.stdout.write(decoded)
-                    f.write(decoded)
-            proc.wait()
-            return proc.returncode == 0
-        except OSError as e:
-            self.log.error(f"Failed to run: {e}")
-            return False
+        ok, _ = self.run_tee_output(cmd, idle_timeout)
+        return ok
 
-    def run_tee_output(self, cmd):
-        """Like run_tee but also returns combined output for inspection."""
+    def run_tee_output(self, cmd, idle_timeout=1800):
+        """Stream command output to console and log; return (ok, combined_output).
+
+        idle_timeout kills the command only if it produces no output at all for
+        that many seconds, distinguishing a genuine hang (e.g. an unreachable pkg
+        repo blocking the catalog fetch) from a slow-but-progressing transfer.
+        Respects dry-run.
+        """
         if self.dry_run:
             self.log.info(f"[DRY RUN] Would run: {cmd}")
             return True, ""
         self.log.info(f"Running: {cmd}")
         collected = []
         try:
-            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            proc = subprocess.Popen(
+                cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            )
             with open(self.log.log_file, "a") as f:
-                for raw in proc.stdout:
-                    decoded = raw.decode("utf-8", errors="replace")
+                while True:
+                    ready, _, _ = select.select([proc.stdout], [], [], idle_timeout)
+                    if not ready:
+                        # No output within the idle window.
+                        if proc.poll() is not None:
+                            break
+                        proc.kill()
+                        self.log.error(
+                            f"No output for {idle_timeout}s, likely hung: {cmd}"
+                        )
+                        return False, "".join(collected)
+                    line = proc.stdout.readline()
+                    if not line:
+                        break  # EOF — process finished
+                    decoded = line.decode("utf-8", errors="replace")
                     sys.stdout.write(decoded)
                     sys.stdout.flush()
                     f.write(decoded)
@@ -256,6 +266,18 @@ class SystemInfo:
         except (URLError, OSError, ValueError):
             return False
 
+    def host_reachable(self, url, timeout=5):
+        """True if the host answers at all. An HTTP error (403/404/redirect)
+        still means the server is up — only connection-level failures (DNS,
+        refused, timeout) count as unreachable."""
+        try:
+            urlopen(url, timeout=timeout).close()
+            return True
+        except HTTPError:
+            return True
+        except (URLError, OSError, ValueError):
+            return False
+
     def fetch_url(self, url, timeout=5):
         try:
             with urlopen(url, timeout=timeout) as r:
@@ -273,6 +295,39 @@ class SystemInfo:
         self.log.error(f"Version {version} not found on pkg mirror")
         self.log.error(f"Checked: {url}")
         return False
+
+    def check_third_party_repos(self):
+        """Check third-party pkg repos for reachability. Returns list of unreachable names."""
+        unreachable = []
+        repo_dir = "/usr/local/etc/pkg/repos"
+        try:
+            conf_files = sorted(glob.glob(f"{repo_dir}/*.conf"))
+        except OSError:
+            return unreachable
+        for conf_path in conf_files:
+            name = os.path.basename(conf_path).replace(".conf", "")
+            if name == "OPNsense":
+                continue
+            try:
+                with open(conf_path) as f:
+                    content = f.read()
+            except OSError:
+                continue
+            if re.search(r'enabled\s*:\s*"?(?:no|false|off|0)\b', content, re.IGNORECASE):
+                continue
+            m = re.search(r'url\s*:\s*"(?:pkg\+)?(https?://[^"]+)"', content)
+            if not m:
+                continue
+            url = m.group(1).rstrip("/")
+            parsed = urlparse(url)
+            base = f"{parsed.scheme}://{parsed.netloc}/"
+            self.log.info(f"Checking repo '{name}' ({parsed.netloc})...")
+            if not self.host_reachable(base, timeout=5):
+                self.log.warning(f"Repo '{name}' is unreachable: {parsed.netloc}")
+                unreachable.append(name)
+            else:
+                self.log.success(f"Repo '{name}' is reachable")
+        return unreachable
 
     def query_latest(self, minor_only=False):
         """Query available versions via multiple methods. Returns best version or None."""
@@ -621,6 +676,19 @@ class OPNsenseUpgrade:
             return False
         self.log.success("Disk space check passed")
 
+        if not self.dry_run:
+            unreachable = self.sys.check_third_party_repos()
+            if unreachable:
+                self.log.warning(f"Unreachable pkg repos: {', '.join(unreachable)}")
+                self.log.warning("These repos will cause pkg to hang. Disable them first:")
+                for rname in unreachable:
+                    self.log.warning(
+                        f"  mv /usr/local/etc/pkg/repos/{rname}.conf"
+                        f" /usr/local/etc/pkg/repos/{rname}.conf.disabled"
+                    )
+                if not self.confirm("Continue anyway (update may hang)?"):
+                    return False
+
         if self.dry_run:
             self.log.info("[DRY RUN] Would check package database (pkg check -Ba)")
             self.log.info("[DRY RUN] Would check for obsolete Python 3.7 packages")
@@ -644,6 +712,27 @@ class OPNsenseUpgrade:
                 self.log.error("pkg process is running. Wait or kill it manually.")
                 return False
             self.sh.run("rm -f /var/run/pkg.lock")
+
+        fw_locks = glob.glob("/tmp/pkg_upgrade*") + glob.glob("/tmp/firmware.progress")
+        if fw_locks:
+            self.log.warning("OPNsense firmware daemon lock files found:")
+            for lf in fw_locks:
+                self.log.warning(f"  {lf}")
+            if self.sh.check("pgrep -f 'pkg-static upgrade'"):
+                self.log.error("A pkg-static upgrade is already running. Kill it first:")
+                self.log.error("  pkill -f 'pkg-static upgrade'")
+                self.log.error("  rm -f /tmp/pkg_upgrade* /tmp/firmware.progress")
+                return False
+            self.log.warning("No active pkg process — locks appear stale")
+            if self.confirm("Remove stale firmware daemon locks and continue?"):
+                for lf in fw_locks:
+                    try:
+                        os.remove(lf)
+                        self.log.info(f"Removed: {lf}")
+                    except OSError:
+                        pass
+            else:
+                return False
 
         self.log.success("Pre-checks completed")
         self.save(Stage.CLEANUP)
