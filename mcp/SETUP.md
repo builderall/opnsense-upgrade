@@ -23,8 +23,10 @@ Step-by-step instructions to prepare your OPNsense firewall and workstation for 
 5. Under **Privileges**, add:
    - `System: Firmware` — check for updates, trigger upgrades, reboot
    - `Diagnostics: System Activity` — system uptime (used to validate reboot status)
-   - `Diagnostics: Backup & Restore` — configuration backup access
-   - `Diagnostics: System Health` — system health metrics
+
+   These two are all the server needs. (Backup download and service-status endpoints
+   are not used — OPNsense restricts them to admin-level access, not grantable to a
+   scoped API key.)
 6. Click **Save**
 
 ---
@@ -151,7 +153,7 @@ Once registered, the following tools are available in Claude:
 |------|------|-------------|
 | `get_version` | read | Current OPNsense version, FreeBSD base, next major version |
 | `check_updates` | read | Minor/major update availability and reboot status |
-| `pre_upgrade_check` | read | Pre-upgrade health assessment: pending minor updates, reboot status, in-progress detection, go/no-go verdict |
+| `pre_upgrade_check` | read | Pre-upgrade health assessment: pending minor updates, reboot status, unreachable repos, in-progress detection, obsolete py37 packages, go/no-go verdict |
 | `upgrade_status` | read | Monitor an in-progress firmware update or upgrade |
 | `get_changelog` | read | Changelog for a specific OPNsense version |
 | `list_packages` | read | All installed packages with versions |

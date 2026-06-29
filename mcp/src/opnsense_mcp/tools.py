@@ -202,13 +202,24 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 header_str = headers[0] if headers else "unavailable"
                 processes = data.get("details", [])[:10]
                 lines = [f"System: {header_str.strip()}"]
+
+                def _first(d, *keys):
+                    """First non-empty value among candidate keys (API key names vary)."""
+                    for k in keys:
+                        v = d.get(k)
+                        if v not in (None, ""):
+                            return v
+                    return ""
+
                 if processes:
                     lines.append("\nTop processes:")
                     lines.append(f"  {'PID':<8} {'USERNAME':<12} {'CPU%':<8} {'MEM%':<8} COMMAND")
                     for p in processes:
+                        cpu = _first(p, "%CPU", "WCPU", "CPU", "C")
+                        mem = _first(p, "%MEM", "MEM")
                         lines.append(
-                            f"  {p.get('PID',''):<8} {p.get('USERNAME',''):<12} "
-                            f"{p.get('%CPU',''):<8} {p.get('%MEM',''):<8} {p.get('COMMAND','')[:40]}"
+                            f"  {_first(p, 'PID'):<8} {_first(p, 'USERNAME'):<12} "
+                            f"{cpu:<8} {mem:<8} {_first(p, 'COMMAND')[:40]}"
                         )
                 return text("\n".join(lines))
 
@@ -290,9 +301,26 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 latest_minor = product.get("product_latest", "")
                 next_major = product.get("CORE_NEXT", "")
                 fw_status = status.get("status", "none")
+                status_msg = status.get("status_msg", "")
                 current_base = current.split("_")[0] if current else ""
 
                 lines.append(f"Current version: {current}")
+
+                # Repository/mirror reachability — an unreachable repo (e.g. a third-party
+                # Zenarmor/SunnyValley mirror) makes pkg hang on the catalog fetch. OPNsense
+                # surfaces this in status_msg; flag it so the verdict reflects the real risk.
+                msg_lc = status_msg.lower()
+                repo_error = "repositor" in msg_lc and any(
+                    w in msg_lc for w in
+                    ("could not", "not found", "unable", "fail", "unreachable", "error")
+                )
+                if repo_error:
+                    lines.append(f"Repository:      UNREACHABLE -- {status_msg}")
+                    issues.append(
+                        f"A configured pkg repository is unreachable ({status_msg}). "
+                        "pkg will hang on the catalog fetch. Disable the offending "
+                        "third-party repo (e.g. SunnyValley/Zenarmor) before updating."
+                    )
 
                 # Minor updates pending?
                 has_minor = fw_status == "update" or (

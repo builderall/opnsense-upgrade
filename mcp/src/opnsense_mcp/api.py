@@ -71,10 +71,16 @@ class OPNsenseAPI:
             data = self.system_activity()
             headers = data.get("headers", [])
             header_str = headers[0] if headers else ""
-            # Format: "up 0+01:08:14" or "up 2 days, 3:45:12"
+            # OPNsense getActivity returns top-style "up D+HH:MM:SS" (e.g. "up 0+18:32:56").
             m = re.search(r"up\s+(\d+)\+(\d+):(\d+):(\d+)", header_str)
             if m:
                 days, hours, mins, secs = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+                return days * 86400 + hours * 3600 + mins * 60 + secs
+            # Fallback for the textual "up N days, HH:MM[:SS]" form some uptime variants emit.
+            m = re.search(r"up\s+(\d+)\s+days?,\s+(\d+):(\d+)(?::(\d+))?", header_str)
+            if m:
+                days, hours, mins = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                secs = int(m.group(4)) if m.group(4) else 0
                 return days * 86400 + hours * 3600 + mins * 60 + secs
             m = re.search(r"up\s+(\d+):(\d+):(\d+)", header_str)
             if m:
@@ -108,6 +114,20 @@ class OPNsenseAPI:
 
         if not needs_reboot:
             return {"needs_reboot": False, "is_stale": False, "explanation": "No reboot required."}
+
+        # upgrade_needs_reboot is OPNsense's authoritative signal that a just-applied
+        # update genuinely requires a reboot (e.g. a kernel bump). When set, the reboot
+        # is real even if versions now match — do NOT treat it as a stale leftover.
+        if upgrade_needs_reboot:
+            return {
+                "needs_reboot": True,
+                "upgrade_needs_reboot": True,
+                "is_stale": False,
+                "uptime_seconds": self.get_uptime_seconds(),
+                "last_check": last_check_str,
+                "explanation": "needs_reboot is set and upgrade_needs_reboot confirms a "
+                               "just-applied update requires a reboot. A reboot is required.",
+            }
 
         # If no packages are pending and system is up to date, the flag is a leftover artifact
         # from a previously applied update that was already rebooted. The UI ignores it too.
