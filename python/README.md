@@ -449,6 +449,31 @@ ssh -M -S /tmp/opnsense.sock -o ControlPersist=1h -fN root@192.168.1.1
 All tests are read-only or dry-run except `-b`, which only writes a config
 backup. Output is teed to `python/logs/` (gitignored).
 
+## Running on the firewall from your workstation
+
+`run-upgrade-on-firewall.sh` is a fallback runner for when the MCP server or
+web UI is misbehaving: it deploys the local script to the firewall and runs it
+over the same SSH ControlMaster socket. **Dry-run by default** — add
+`--execute` to perform a real run, which the wrapper confirms first.
+
+A real run is launched **detached** (`nohup`) on the firewall so a mid-upgrade
+reboot or SSH drop does not kill it; the wrapper then follows the log, and
+`--follow` re-attaches to the auto-resume log after a reboot.
+
+```sh
+# Open the SSH master once (prompts for the root password):
+ssh -M -S /tmp/opnsense.sock -o ControlPersist=1h -fN root@192.168.1.1
+
+./python/run-upgrade-on-firewall.sh --latest            # read-only query
+./python/run-upgrade-on-firewall.sh --minor             # dry-run preview
+./python/run-upgrade-on-firewall.sh --minor --execute   # real minor update (confirms)
+./python/run-upgrade-on-firewall.sh --major 26.7 --execute
+./python/run-upgrade-on-firewall.sh --follow            # re-attach after a reboot
+```
+
+See `--help` for all modes (`--auto-major`, `--resume`, `--backup`, `--clean`)
+and options (`--yes`, `--no-deploy`).
+
 ## Best Practices
 
 1. **Always test with dry-run first** - Run without `-x` to preview
