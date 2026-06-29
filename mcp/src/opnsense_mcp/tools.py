@@ -213,10 +213,12 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
 
                 if processes:
                     lines.append("\nTop processes:")
-                    lines.append(f"  {'PID':<8} {'USERNAME':<12} {'CPU%':<8} {'MEM%':<8} COMMAND")
+                    # getActivity (top -aHSTn thread mode) exposes WCPU and RES,
+                    # not %CPU/%MEM — fall back through the names that actually appear.
+                    lines.append(f"  {'PID':<8} {'USERNAME':<12} {'CPU%':<8} {'RES':<8} COMMAND")
                     for p in processes:
                         cpu = _first(p, "%CPU", "WCPU", "CPU", "C")
-                        mem = _first(p, "%MEM", "MEM")
+                        mem = _first(p, "%MEM", "MEM", "RES", "SIZE")
                         lines.append(
                             f"  {_first(p, 'PID'):<8} {_first(p, 'USERNAME'):<12} "
                             f"{cpu:<8} {mem:<8} {_first(p, 'COMMAND')[:40]}"
