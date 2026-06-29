@@ -12,7 +12,7 @@ A Claude MCP server that connects Claude Code directly to your OPNsense firewall
 |------|------|-------------|
 | `get_version` | read | Current OPNsense version, FreeBSD base, next major version |
 | `check_updates` | read | Minor/major update availability and reboot status |
-| `pre_upgrade_check` | read | Pre-upgrade health assessment with go/no-go verdict |
+| `pre_upgrade_check` | read | Pre-upgrade health assessment with go/no-go verdict (flags pending minor updates, genuine reboots, unreachable repos, in-progress upgrades, obsolete py37 packages) |
 | `upgrade_status` | read | Monitor an in-progress upgrade |
 | `get_changelog` | read | Changelog for a specific version |
 | `list_packages` | read | Installed packages with versions |
@@ -41,5 +41,5 @@ mcp/
 ## Requirements
 
 - Python 3.10+ on your workstation
-- OPNsense with a dedicated API user — privileges: `System: Firmware`, `Diagnostics: System Activity`, `Diagnostics: Backup & Restore`, `Diagnostics: System Health`
+- OPNsense with a dedicated API user — privileges: `System: Firmware`, `Diagnostics: System Activity`
 - Claude Code CLI or VSCode extension

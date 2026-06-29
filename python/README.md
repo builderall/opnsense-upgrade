@@ -228,7 +228,7 @@ Add `-x` to execute for real. When executing, the script asks for confirmation b
 
 | Stage | Description |
 |-------|-------------|
-| **Pre-checks** | Disk space (2GB min), pkg database validation, lock file cleanup |
+| **Pre-checks** | Disk space (2GB min), third-party pkg repo reachability, pkg database validation, lock file + firmware-daemon lock cleanup |
 | **Cleanup** | Remove unused packages, clean cache, clear temp files |
 | **Backup** | Save config.xml and package list |
 | **Base/Kernel** | Runs `opnsense-update -bk` — reboots if kernel changed. For major upgrades uses `opnsense-update -ubkf` and always reboots |
@@ -249,7 +249,7 @@ The script uses 5 classes with single-responsibility design:
 | `StateManager` | JSON state file persistence |
 | `OPNsenseUpgrade` | Orchestrator — stages, reboot handling, main flow |
 
-**Stdlib modules used:** `argparse`, `json`, `subprocess`, `urllib`, `os`, `re`, `shutil`, `time`, `datetime`
+**Stdlib modules used:** `argparse`, `glob`, `json`, `subprocess`, `select`, `urllib`, `os`, `re`, `shutil`, `time`, `datetime`
 
 ## Version Detection
 
@@ -361,6 +361,38 @@ pkill pkg
 rm -f /var/run/pkg.lock
 ```
 
+### Update hangs with no output (unreachable third-party repo)
+
+`pkg` fetches the package catalog from **every** configured repo before installing
+anything. If a third-party repo (e.g. SunnyValley/Zenarmor) is unreachable, `pkg` hangs
+silently — the OPNsense web UI hangs the same way. The pre-checks now probe each enabled
+repo in `/usr/local/etc/pkg/repos/` and warn before starting. To unblock, temporarily
+disable the offending repo and retry:
+
+```sh
+mv /usr/local/etc/pkg/repos/SunnyValley.conf \
+   /usr/local/etc/pkg/repos/SunnyValley.conf.disabled
+./opnsense-upgrade.py -x -m
+# Re-enable afterwards
+mv /usr/local/etc/pkg/repos/SunnyValley.conf.disabled \
+   /usr/local/etc/pkg/repos/SunnyValley.conf
+```
+
+If a long-running command stops producing output entirely for 30 minutes, the script now
+aborts it instead of hanging forever.
+
+### Stuck firmware daemon (web UI update won't start)
+
+If the OPNsense web UI left a stuck update, the firmware daemon's lock files block new
+runs. The pre-checks detect `/tmp/pkg_upgrade*` and `/tmp/firmware.progress`; if no `pkg`
+process is actually running they offer to clear them. To clear manually:
+
+```sh
+pkill -f 'pkg-static upgrade'
+rm -f /tmp/pkg_upgrade* /tmp/firmware.progress
+service configd restart
+```
+
 ### "Insufficient disk space"
 
 Free up space:
@@ -386,6 +418,62 @@ ls -lh /var/log/opnsense-upgrades/
 tail -f /var/log/opnsense-upgrades/opnsense-*.log
 ```
 
+## Tests
+
+**Unit tests** (`test_shell.py`) cover the hang-prevention logic (command
+idle-timeout and repo reachability). Stdlib only — no network or OPNsense
+access required:
+
+```sh
+python3 python/test_shell.py
+```
+
+**Live firewall tests** (`test-on-firewall.sh`) exercise the script's read-only
+and dry-run paths (repo reachability, mirror validation, resume detection,
+backup) plus the unit tests against a real OPNsense over SSH. It uses an SSH
+ControlMaster socket so you authenticate once; if the socket is not open the
+script prints the exact command to open it.
+
+```sh
+# 1. In your terminal, open a master connection (prompts for the root
+#    password once; stays alive 1 hour):
+ssh -M -S /tmp/opnsense.sock -o ControlPersist=1h -fN root@192.168.1.1
+
+# 2. Run the suite (override target with FW_HOST=...):
+./python/test-on-firewall.sh
+
+# Optional: scp the local script to the firewall first
+./python/test-on-firewall.sh --deploy
+```
+
+All tests are read-only or dry-run except `-b`, which only writes a config
+backup. Output is teed to `python/logs/` (gitignored).
+
+## Running on the firewall from your workstation
+
+`run-upgrade-on-firewall.sh` is a fallback runner for when the MCP server or
+web UI is misbehaving: it deploys the local script to the firewall and runs it
+over the same SSH ControlMaster socket. **Dry-run by default** — add
+`--execute` to perform a real run, which the wrapper confirms first.
+
+A real run is launched **detached** (`nohup`) on the firewall so a mid-upgrade
+reboot or SSH drop does not kill it; the wrapper then follows the log, and
+`--follow` re-attaches to the auto-resume log after a reboot.
+
+```sh
+# Open the SSH master once (prompts for the root password):
+ssh -M -S /tmp/opnsense.sock -o ControlPersist=1h -fN root@192.168.1.1
+
+./python/run-upgrade-on-firewall.sh --latest            # read-only query
+./python/run-upgrade-on-firewall.sh --minor             # dry-run preview
+./python/run-upgrade-on-firewall.sh --minor --execute   # real minor update (confirms)
+./python/run-upgrade-on-firewall.sh --major 26.7 --execute
+./python/run-upgrade-on-firewall.sh --follow            # re-attach after a reboot
+```
+
+See `--help` for all modes (`--auto-major`, `--resume`, `--backup`, `--clean`)
+and options (`--yes`, `--no-deploy`).
+
 ## Best Practices
 
 1. **Always test with dry-run first** - Run without `-x` to preview
@@ -400,6 +488,9 @@ tail -f /var/log/opnsense-upgrades/opnsense-*.log
 
 - **Dry-run by default** - Must explicitly use `-x` to execute
 - **Pre-flight checks** - Validates disk space, pkg database, locks
+- **Third-party repo reachability** - Probes each enabled pkg repo before starting; an unreachable repo (e.g. Zenarmor) would otherwise hang the whole update
+- **Firmware-daemon lock cleanup** - Detects and clears stale web-UI update locks that would block a new run
+- **Command idle-timeout** - Long-running pkg/opnsense-update commands abort after 30 min of no output instead of hanging indefinitely
 - **State persistence** - Can resume from any stage after reboot
 - **Always backs up** - Config and package list saved before every upgrade
 - **Mirror validation** - Ensures target version exists before starting

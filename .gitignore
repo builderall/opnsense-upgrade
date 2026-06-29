@@ -5,3 +5,4 @@ __pycache__/
 mcp/.env
 mcp/*.txt
 mcp/.venv/
+python/logs/

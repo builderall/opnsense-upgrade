@@ -80,6 +80,60 @@ TOOLS = [
 ]
 
 
+def _repo_error(status: dict) -> str | None:
+    """Return status_msg when it signals an unreachable/missing pkg repo, else None.
+
+    An unreachable repo (e.g. a third-party SunnyValley/Zenarmor mirror) makes pkg
+    hang on the catalog fetch before installing anything. Matches the error signature
+    ("repositor" + an error word) without false-flagging benign messages like
+    "no updates available on the selected mirror".
+    """
+    msg = status.get("status_msg", "") or ""
+    low = msg.lower()
+    if "repositor" in low and any(
+        w in low for w in ("could not", "not found", "unable", "fail", "unreachable", "error")
+    ):
+        return msg
+    return None
+
+
+def _version_state(status: dict) -> dict:
+    """Firmware-version fields shared by the update/upgrade/check handlers.
+
+    has_minor is True when a minor update is pending (status 'update', or a
+    product_latest that differs from the suffix-stripped current version).
+    """
+    product = status.get("product", {})
+    current = product.get("product_version", "")
+    latest_minor = product.get("product_latest", "")
+    current_base = current.split("_")[0] if current else ""
+    fw_status = status.get("status", "none")
+    has_minor = fw_status == "update" or bool(
+        latest_minor and current_base and latest_minor != current_base
+    )
+    return {
+        "product": product,
+        "current": current,
+        "latest_minor": latest_minor,
+        "next_major": product.get("CORE_NEXT", ""),
+        "current_base": current_base,
+        "fw_status": fw_status,
+        "has_minor": has_minor,
+    }
+
+
+def _repo_blocked_text(status_msg: str) -> str:
+    """Guidance shown when a write tool refuses because a repo is unreachable."""
+    return (
+        "Blocked: a configured pkg repository is unreachable.\n"
+        f"  {status_msg}\n\n"
+        "pkg fetches every repo's catalog before installing, so this would hang. "
+        "Disable the offending third-party repo on the firewall (e.g. "
+        "SunnyValley/Zenarmor), then retry:\n"
+        "  mv /usr/local/etc/pkg/repos/SunnyValley.conf{,.disabled}"
+    )
+
+
 def register_tools(server: Server, config: Config) -> OPNsenseAPI:
     api = OPNsenseAPI(config)
 
@@ -166,6 +220,17 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 if log_lines:
                     lines.append("\nLog (last 20 lines):")
                     lines.extend(log_lines.strip().splitlines()[-20:])
+                # A "running" status with an unreachable repo is the classic stall:
+                # pkg blocks on the catalog fetch and the log stops advancing.
+                if fw_status == "running":
+                    rerr = _repo_error(api.firmware_status())
+                    if rerr:
+                        lines.append(
+                            f"\nWARNING: a pkg repository is unreachable ({rerr}). The run is "
+                            "likely stalled on the catalog fetch. If the log is not advancing, it "
+                            "may need manual recovery on the firewall: kill the stuck pkg process, "
+                            "disable the offending repo, then retry."
+                        )
                 return text("\n".join(lines))
 
             elif name == "get_changelog":
@@ -176,7 +241,13 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     return text(f"No changelog found for version {version}.")
                 clean = re.sub(r"<[^>]+>", "", html).strip()
                 clean = re.sub(r"\n{3,}", "\n\n", clean)
-                return text(f"Changelog for {version}:\n\n{clean[:4000]}")
+                limit = 4000
+                if len(clean) > limit:
+                    clean = clean[:limit].rstrip() + (
+                        f"\n\n... [truncated {len(clean) - limit} more characters; "
+                        "see the full changelog in the OPNsense web UI]"
+                    )
+                return text(f"Changelog for {version}:\n\n{clean}")
 
             elif name == "list_packages":
                 # firmware_info (POST) forces a fresh fetch; fall back to cached status if needed
@@ -202,13 +273,26 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 header_str = headers[0] if headers else "unavailable"
                 processes = data.get("details", [])[:10]
                 lines = [f"System: {header_str.strip()}"]
+
+                def _first(d, *keys):
+                    """First non-empty value among candidate keys (API key names vary)."""
+                    for k in keys:
+                        v = d.get(k)
+                        if v not in (None, ""):
+                            return v
+                    return ""
+
                 if processes:
                     lines.append("\nTop processes:")
-                    lines.append(f"  {'PID':<8} {'USERNAME':<12} {'CPU%':<8} {'MEM%':<8} COMMAND")
+                    # getActivity (top -aHSTn thread mode) exposes WCPU and RES,
+                    # not %CPU/%MEM — fall back through the names that actually appear.
+                    lines.append(f"  {'PID':<8} {'USERNAME':<12} {'CPU%':<8} {'RES':<8} COMMAND")
                     for p in processes:
+                        cpu = _first(p, "%CPU", "WCPU", "CPU", "C")
+                        mem = _first(p, "%MEM", "MEM", "RES", "SIZE")
                         lines.append(
-                            f"  {p.get('PID',''):<8} {p.get('USERNAME',''):<12} "
-                            f"{p.get('%CPU',''):<8} {p.get('%MEM',''):<8} {p.get('COMMAND','')[:40]}"
+                            f"  {_first(p, 'PID'):<8} {_first(p, 'USERNAME'):<12} "
+                            f"{cpu:<8} {mem:<8} {_first(p, 'COMMAND')[:40]}"
                         )
                 return text("\n".join(lines))
 
@@ -221,13 +305,11 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 # Block if already up to date — use same two-condition logic as check_updates
                 # to handle stale firmware daemon cache (status="none" but product_latest > product_version)
                 status = api.firmware_status()
-                product = status.get("product", {})
-                current = product.get("product_version", "")
-                latest_minor = product.get("product_latest", "")
-                fw_status = status.get("status", "none")
-                current_base = current.split("_")[0] if current else ""
-                has_update = fw_status == "update" or (latest_minor and latest_minor != current_base)
-                if not has_update:
+                # Refuse if a repo is unreachable — triggering would hang on the catalog fetch
+                rerr = _repo_error(status)
+                if rerr:
+                    return text(_repo_blocked_text(rerr))
+                if not _version_state(status)["has_minor"]:
                     return text("System is already up to date. No update needed.")
                 result = api.firmware_update()
                 msg = result.get("msg", "") or result.get("status", str(result))
@@ -241,12 +323,13 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     return text("An upgrade/update is already in progress. Use upgrade_status to monitor it.")
                 # Check firmware status before proceeding
                 status = api.firmware_status()
-                product = status.get("product", {})
-                current = product.get("product_version", "")
-                latest_minor = product.get("product_latest", "")
-                next_major = product.get("CORE_NEXT", "")
-                fw_status = status.get("status", "none")
-                current_base = current.split("_")[0] if current else ""
+                # Refuse if a repo is unreachable — triggering would hang on the catalog fetch
+                rerr = _repo_error(status)
+                if rerr:
+                    return text(_repo_blocked_text(rerr))
+                vs = _version_state(status)
+                current, latest_minor = vs["current"], vs["latest_minor"]
+                next_major, fw_status = vs["next_major"], vs["fw_status"]
 
                 # Block if the major upgrade is not actually available on the mirror yet
                 if fw_status != "upgrade":
@@ -259,10 +342,7 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     return text("No major upgrade is available. System is up to date.")
 
                 # Block if minor updates are pending (must apply minor updates before major upgrade)
-                has_minor = fw_status == "update" or (
-                    latest_minor and current_base and latest_minor != current_base
-                )
-                if has_minor:
+                if vs["has_minor"]:
                     return text(
                         f"Minor update pending: {current} -> {latest_minor}\n\n"
                         "OPNsense requires all minor updates to be applied before a major upgrade. "
@@ -285,19 +365,28 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
 
                 # Firmware status (single call, reused below)
                 status = api.firmware_status()
-                product = status.get("product", {})
-                current = product.get("product_version", "unknown")
-                latest_minor = product.get("product_latest", "")
-                next_major = product.get("CORE_NEXT", "")
-                fw_status = status.get("status", "none")
-                current_base = current.split("_")[0] if current else ""
+                vs = _version_state(status)
+                current = vs["current"] or "unknown"
+                latest_minor = vs["latest_minor"]
+                next_major = vs["next_major"]
+                fw_status = vs["fw_status"]
+                has_minor = vs["has_minor"]
 
                 lines.append(f"Current version: {current}")
 
+                # Repository/mirror reachability — an unreachable repo (e.g. a third-party
+                # Zenarmor/SunnyValley mirror) makes pkg hang on the catalog fetch. OPNsense
+                # surfaces this in status_msg; flag it so the verdict reflects the real risk.
+                rerr = _repo_error(status)
+                if rerr:
+                    lines.append(f"Repository:      UNREACHABLE -- {rerr}")
+                    issues.append(
+                        f"A configured pkg repository is unreachable ({rerr}). "
+                        "pkg will hang on the catalog fetch. Disable the offending "
+                        "third-party repo (e.g. SunnyValley/Zenarmor) before updating."
+                    )
+
                 # Minor updates pending?
-                has_minor = fw_status == "update" or (
-                    latest_minor and current_base and latest_minor != current_base
-                )
                 if has_minor:
                     lines.append(f"Minor update:    {latest_minor} -- PENDING (must apply before major upgrade)")
                     issues.append(f"Minor update pending ({current} -> {latest_minor}). Run run_update first.")

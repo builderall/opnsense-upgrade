@@ -29,7 +29,7 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 ## OPNsense Context
 
 - Firewall hostname: `OPNsense.home.lan` (user's local DNS)
-- Current version: 26.1.2 (upgraded from 26.1.1 during development)
+- Current version: 26.1.10 (incrementally updated from 26.1.1 during development)
 - Next major version: 26.7 (confirmed via API `CORE_NEXT` field)
 - Version format: YY.M.P (e.g., 26.1.2) with pkg revision suffix `_N` (e.g., 26.1.2_5) — always strip suffix for comparisons
 - Minor updates: within same branch (26.1.1 -> 26.1.2)
@@ -124,17 +124,21 @@ Privileges required:
 
 ### Pending MCP Work
 
-1. **Test write tools** (`run_update`, `run_upgrade`, `reboot`) — guards verified working; actual execution pending a real upgrade (26.1.3 or 26.7 when released).
-2. **Add mcp/README.md** — user-facing README for the mcp/ directory.
+1. **Test `run_upgrade` + `reboot`** — guards verified working; actual execution still pending a real major upgrade (26.7 when released). `run_update` is now exercised live (see Completed).
 
 ### Completed MCP Work
 
 - Live tested all 10 read tools against OPNsense 26.1.2 via Claude Code VSCode session — all working.
+- `run_update` exercised live during the 26.1.8_5 -> 26.1.10 minor update — trigger, duplicate-run guard, and "already up to date" guard all confirmed.
 - `check_services` and `get_config_backup` removed — both require admin-level API access not grantable via restricted keys.
 - Path expansion confirmed — `~` expands correctly in `bash -c "cd ~/..."` args.
 - mcp/.env URL confirmed — `https://192.168.1.1` working.
 - Error handling added — graceful messages for ConnectError, TimeoutException, HTTPStatusError.
 - Safety guards on write tools — blocks duplicate runs, pending minor updates before major upgrade, unreleased versions.
+- mcp/README.md added — user-facing README for the mcp/ directory.
+- `system_info` columns fixed — `getActivity` (top `-aHSTn` thread mode) exposes `WCPU` and `RES`, not `%CPU`/`%MEM`, so both columns were always blank. CPU% now falls back through `%CPU`/`WCPU`/`CPU`/`C`; the memory column falls back through `%MEM`/`MEM`/`RES`/`SIZE` and is relabeled `RES` (resident size, e.g. eastpect at 284M). Verified live on 26.1.10.
+- `pre_upgrade_check` now flags an unreachable pkg repo (via `status_msg`) as a NOT-READY issue — see the SunnyValley/Zenarmor incident note below.
+- Write tools now refuse on an unreachable repo — `run_update`/`run_upgrade` call shared `_repo_error()` and return `_repo_blocked_text()` instead of triggering a doomed (hanging) run; `upgrade_status` appends a stall warning when a `running` status coincides with a repo error. Repo-error detection is now one shared helper used by all four (was inline in `pre_upgrade_check`).
 
 ## Testing Status (python script)
 
@@ -146,7 +150,9 @@ Privileges required:
 ## MCP API Notes
 
 - `needs_reboot: 1` in firmware status after 26.1.2 upgrade: **leftover artifact** — UI shows no reboot needed. The flag persists in the cached API response even after the reboot. Fixed in `api.py`: if no packages are pending and `status == 'none'`, flag is treated as stale regardless of timing.
-- Reboot staleness logic in `api.py` (two-stage): (1) if no pending packages + `status == 'none'` => leftover artifact, safe to ignore; (2) else compare uptime vs last_check_age — if `uptime < last_check_age`, check predates this boot => stale; if `uptime > last_check_age`, daemon ran after boot => genuine.
+- Reboot staleness logic in `api.py` (three-stage): (1) **`upgrade_needs_reboot == '1'` => genuine, never stale** — OPNsense's authoritative signal that a just-applied update (e.g. a kernel bump) requires a reboot; this overrides the version-match path so a real post-update reboot is never hidden; (2) if no pending packages + (`status == 'none'` or current==latest) => leftover artifact, safe to ignore; (3) else compare uptime vs last_check_age — if `uptime < last_check_age`, check predates this boot => stale; if `uptime > last_check_age`, daemon ran after boot => genuine.
+- Unreachable third-party pkg repo (SunnyValley/Zenarmor) hangs both the web UI and `pkg` — `pkg` fetches every repo catalog before installing. Symptom: `check_updates` reports `status_msg` "Could not find the repository on the selected mirror" and an `update`/`upgrade` trigger never produces log output past the first two lines. `pre_upgrade_check` now detects this in `status_msg` (keyword `repositor` + an error word) and forces a NOT-READY verdict. Fix on the firewall: `mv /usr/local/etc/pkg/repos/SunnyValley.conf{,.disabled}`, retry, then re-enable. The python script also probes repo reachability in pre-checks. (Incident: 2026-06-28 during the 26.1.8_5 -> 26.1.10 update.)
+- `last_check` timezone caveat: `parse_last_check_age_seconds` strips the firewall's TZ name and compares against the workstation's local `datetime.now()` — only correct when firewall and workstation share a timezone. A differing TZ skews `last_check_age` by the offset and can flip the genuine/stale verdict.
 - `GET` requests to diagnostics endpoints return 401; use `POST` for `getActivity` and similar.
 - `CORE_NEXT: 26.7` confirmed in firmware status API — next major version detection works.
 - Error handling in `tools.py` `call_tool`: top-level `try/except` catches `httpx.ConnectError` (firewall unreachable), `httpx.TimeoutException`, `httpx.HTTPStatusError` (4xx/5xx with status code), and general `Exception`. `ValueError` is re-raised so read-only blocks and unknown-tool errors surface normally to the MCP caller.
