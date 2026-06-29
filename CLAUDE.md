@@ -136,7 +136,7 @@ Privileges required:
 - Error handling added — graceful messages for ConnectError, TimeoutException, HTTPStatusError.
 - Safety guards on write tools — blocks duplicate runs, pending minor updates before major upgrade, unreleased versions.
 - mcp/README.md added — user-facing README for the mcp/ directory.
-- `system_info` CPU%/MEM% columns fixed — fell back through actual `getActivity` key names (`%CPU`/`WCPU`/`CPU`/`C`, `%MEM`/`MEM`) instead of always-blank `%CPU`/`%MEM`.
+- `system_info` columns fixed — `getActivity` (top `-aHSTn` thread mode) exposes `WCPU` and `RES`, not `%CPU`/`%MEM`, so both columns were always blank. CPU% now falls back through `%CPU`/`WCPU`/`CPU`/`C`; the memory column falls back through `%MEM`/`MEM`/`RES`/`SIZE` and is relabeled `RES` (resident size, e.g. eastpect at 284M). Verified live on 26.1.10.
 - `pre_upgrade_check` now flags an unreachable pkg repo (via `status_msg`) as a NOT-READY issue — see the SunnyValley/Zenarmor incident note below.
 
 ## Testing Status (python script)
