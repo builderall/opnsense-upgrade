@@ -511,7 +511,13 @@ class SystemInfo:
         return m.group(1) if m else None
 
     def _check_changelog(self, current, found_major, found_minor):
-        """Scan changelog directory for version hints."""
+        """Scan changelog directory for major-upgrade hints.
+
+        Changelog entries only expose branch-level granularity (e.g. "26.1"),
+        never a patch version, so this is used for major detection only — a
+        bare branch string is not a valid minor-update target. Patch-level
+        minor updates come from pkg rquery / the mirror probe instead.
+        """
         versions = set()
         for name in os.listdir(self.CHANGELOG_DIR):
             m = re.match(r"^(\d+\.\d+)", name)
@@ -526,8 +532,6 @@ class SystemInfo:
             self.log.info(f"Changelog indicates major upgrade: {latest}")
             if not found_major:
                 found_major = latest
-        elif not found_minor or found_minor == current:
-            found_minor = latest
         return found_major, found_minor
 
     def detect_state(self, target_version):
