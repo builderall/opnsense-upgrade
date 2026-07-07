@@ -1,7 +1,9 @@
-.claude/
+.claude/*
+!.claude/skills/
 .continue/
 __pycache__/
 *.pyc
+logs/
 mcp/.env
 mcp/*.txt
 mcp/.venv/
