@@ -34,6 +34,26 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 - Python script targets Python 3 on FreeBSD (OPNsense)
 - MCP server targets Python 3.10+ on user's workstation (Linux/WSL)
 
+### Language Policy
+
+Each language has a defined role — do not deviate for new components:
+
+| Language | Used for | Why |
+|---|---|---|
+| Python 3 (stdlib only) | `python/opnsense-upgrade.py` + its tests | Runs on the firewall (FreeBSD); no pip there |
+| Python 3.10+ (mcp/.venv) | `mcp/` package; any workstation tool with logic (e.g. the watch-update watcher) | One venv, one source of truth — tools import `Config`, `OPNsenseAPI`, `_repo_error` from the MCP package instead of re-implementing them |
+| bash | Orchestration and glue only: SSH drivers (`test-on-firewall.sh`, `run-upgrade-on-firewall.sh`), thin launchers, `push.sh` | Process/pipe wrangling is what shell is for; no business logic |
+| PowerShell | `ps1/` Windows-side recovery tools | Windows host is the runtime |
+
+Rules of thumb:
+- If a bash script needs `python3 -c` more than once, it should be a Python script with a
+  thin bash launcher (see `.claude/skills/watch-update/`).
+- Never re-implement MCP package logic (repo-error detection, .env parsing, API calls) in
+  another language — import it from `mcp/.venv` instead. The original bash watcher did,
+  and the duplicated `_repo_error()` signature was a standing drift risk until PR #12.
+- Launchers exist to keep stable entry points (Monitor commands, hooks, docs); keep them
+  under ~20 lines with no logic beyond path resolution and exec.
+
 ## OPNsense Context
 
 - Firewall hostname: `OPNsense.home.lan` (user's local DNS)
