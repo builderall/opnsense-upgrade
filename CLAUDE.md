@@ -142,6 +142,11 @@ Privileges required:
 
 ## Testing Status (python script)
 
+- **Deployed on firewall:** v1.3 with PR #8 fixes, copied to `/root/opnsense-upgrade.py`
+  on 2026-07-06 (md5-verified, compile + `-l` smoke-tested live). The firewall copy does
+  NOT auto-update — redeploy after every merged change to `python/opnsense-upgrade.py`
+  via `python/test-on-firewall.sh --deploy` (needs the SSH control socket open; the v1.0
+  copy sat stale on the firewall for months before this was caught).
 - Minor update (26.1.1 -> 26.1.2) tested successfully on OPNsense 26.1
 - `pkg rquery '%v' opnsense` confirmed as reliable minor version detection fallback
 - Reboot detection (`"please reboot" in output`) logic correct but untested — minor update did not change the FreeBSD kernel so no reboot was triggered
