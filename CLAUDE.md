@@ -16,7 +16,10 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 - `mcp/SETUP.md` — Step-by-step setup guide for new users.
 - `mcp/src/opnsense_mcp/` — MCP server Python package (see MCP Server section below).
 - `.claude/skills/watch-update/` — Claude Code skill: follows a running update through the
-  mid-update reboot via a Monitor event stream (read-only polling script + SKILL.md).
+  mid-update reboot via a Monitor event stream. Watcher logic is `watch_update.py` (runs
+  from mcp/.venv, imports the MCP package — single source of truth for repo-error
+  detection and config); `watch-update.sh` is a thin launcher kept as the stable entry
+  point for the Monitor command and the PostToolUse hook.
 - `.claude/settings.json` — project hook: after `run_update`/`run_upgrade` actually triggers
   (response contains "triggered"; blocked/no-op responses are ignored), a PostToolUse hook
   injects an instruction to invoke the watch-update skill, so no update runs unwatched.
