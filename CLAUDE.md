@@ -147,18 +147,18 @@ Privileges required:
 ## MCP API Notes
 
 - `needs_reboot: 1` in firmware status after 26.1.2 upgrade: **leftover artifact** — UI shows no reboot needed. The flag persists in the cached API response even after the reboot. Fixed in `api.py`: if no packages are pending and `status == 'none'`, flag is treated as stale regardless of timing.
-- Reboot staleness logic in `api.py` (three-stage): (1) **`upgrade_needs_reboot == '1'` => genuine, never stale** — OPNsense's authoritative signal that a just-applied update (e.g. a kernel bump) requires a reboot; this overrides the version-match path so a real post-update reboot is never hidden; (2) if no pending packages + (`status == 'none'` or current==latest) => leftover artifact, safe to ignore; (3) else compare uptime vs last_check_age — if `uptime < last_check_age`, check predates this boot => stale; if `uptime > last_check_age`, daemon ran after boot => genuine.
+- Reboot staleness logic in `api.py` (four-stage): (1) **pending packages + `status` in (`update`, `upgrade`) => `pending_update_reboot`** — the flag describes the *upcoming* batch ("applying this will reboot"), informational, never an issue; (2) **`upgrade_needs_reboot == '1'` => genuine, never stale** — OPNsense's authoritative signal that a just-applied update (e.g. a kernel bump) requires a reboot; this overrides the version-match path so a real post-update reboot is never hidden; (3) if no pending packages + (`status == 'none'` or current==latest) => leftover artifact, safe to ignore; (4) else compare uptime vs last_check_age — if `uptime < last_check_age`, check predates this boot => stale; if `uptime > last_check_age`, daemon ran after boot => genuine.
 - Unreachable third-party pkg repo (SunnyValley/Zenarmor) hangs both the web UI and `pkg` — `pkg` fetches every repo catalog before installing. Symptom: `check_updates` reports `status_msg` "Could not find the repository on the selected mirror" and an `update`/`upgrade` trigger never produces log output past the first two lines. `pre_upgrade_check` now detects this in `status_msg` (keyword `repositor` + an error word) and forces a NOT-READY verdict. Fix on the firewall: `mv /usr/local/etc/pkg/repos/SunnyValley.conf{,.disabled}`, retry, then re-enable. The python script also probes repo reachability in pre-checks. (Incident: 2026-06-28 during the 26.1.8_5 -> 26.1.10 update.)
 - Post-reboot `upgradestatus` residue: right after a reboot the endpoint reports
   `status: "error"` with an empty log — stale residue from the pre-reboot run, not a failure.
   The watch-update skill script ignores terminal statuses until it has seen the run start.
-- `upgrade_needs_reboot` pre-update semantics gap: OPNsense sets the flag to `1` when a
-  *pending* update includes kernel/base (meaning "applying this will reboot"), but
-  `api.py` stage 1 treats the flag as a genuine post-update reboot-needed signal, so
-  `pre_upgrade_check` lists "Reboot required before upgrading" as a NOT-READY issue —
-  a false positive when `status == "update"` with a kernel batch pending. Observed live
-  before the 26.1.10 -> 26.1.11 update (2026-07-06). Fix idea: when `status == "update"`,
-  report the flag as "the pending update will reboot the system" instead of an issue.
+- `needs_reboot` pre-update semantics (FIXED 2026-07-06): OPNsense sets the flag when a
+  *pending* update includes kernel/base (meaning "applying this will reboot"), which the
+  uptime-comparison stage misread as a genuine outstanding reboot, so `pre_upgrade_check`
+  listed "Reboot required before upgrading" as a NOT-READY issue — a false positive
+  observed live before the 26.1.10 -> 26.1.11 update. Fixed via the
+  `pending_update_reboot` stage in `check_needs_reboot()` (see staleness logic above);
+  `pre_upgrade_check` now reports it as "(not a blocker)".
 - `last_check` timezone caveat: `parse_last_check_age_seconds` strips the firewall's TZ name and compares against the workstation's local `datetime.now()` — only correct when firewall and workstation share a timezone. A differing TZ skews `last_check_age` by the offset and can flip the genuine/stale verdict.
 - `GET` requests to diagnostics endpoints return 401; use `POST` for `getActivity` and similar.
 - `CORE_NEXT: 26.7` confirmed in firmware status API — next major version detection works.

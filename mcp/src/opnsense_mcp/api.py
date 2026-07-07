@@ -115,6 +115,30 @@ class OPNsenseAPI:
         if not needs_reboot:
             return {"needs_reboot": False, "is_stale": False, "explanation": "No reboot required."}
 
+        pending_packages = any([
+            status.get("upgrade_packages"),
+            status.get("new_packages"),
+            status.get("reinstall_packages"),
+            status.get("downgrade_packages"),
+            status.get("remove_packages"),
+        ])
+
+        # With a pending update/upgrade batch, needs_reboot describes the *upcoming*
+        # run ("applying this will reboot the system", e.g. kernel/base included) —
+        # not an outstanding reboot. It must not read as "reboot before updating":
+        # OPNsense reboots automatically mid-update. Observed live before the
+        # 26.1.10 -> 26.1.11 update (2026-07-06).
+        if pending_packages and status.get("status") in ("update", "upgrade"):
+            return {
+                "needs_reboot": True,
+                "upgrade_needs_reboot": upgrade_needs_reboot,
+                "is_stale": False,
+                "pending_update_reboot": True,
+                "explanation": "needs_reboot refers to the pending update/upgrade: applying "
+                               "it will reboot the system automatically (kernel/base in the "
+                               "batch). No reboot is required beforehand.",
+            }
+
         # upgrade_needs_reboot is OPNsense's authoritative signal that a just-applied
         # update genuinely requires a reboot (e.g. a kernel bump). When set, the reboot
         # is real even if versions now match — do NOT treat it as a stale leftover.
@@ -131,13 +155,6 @@ class OPNsenseAPI:
 
         # If no packages are pending and system is up to date, the flag is a leftover artifact
         # from a previously applied update that was already rebooted. The UI ignores it too.
-        pending_packages = any([
-            status.get("upgrade_packages"),
-            status.get("new_packages"),
-            status.get("reinstall_packages"),
-            status.get("downgrade_packages"),
-            status.get("remove_packages"),
-        ])
         product = status.get("product", {})
         current_ver = product.get("product_version", "").split("_")[0]
         latest_ver = product.get("product_latest", "").split("_")[0]
