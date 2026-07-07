@@ -171,7 +171,7 @@ Write tools require explicit user confirmation and are blocked when `OPNSENSE_RE
 - `upgrade_status` — warns when a "running" status coincides with an unreachable repo, the classic stalled-update signature
 - `check_updates` — appends the same unreachable-repo warning so the problem is visible before any write tool is attempted
 
-**Note on reboots:** The "Reboot status: not required" shown by `check_updates` reflects the *current* state — it means no reboot is pending from a previous operation. It does not predict whether the upcoming update will reboot the system. If the update includes kernel or base packages, OPNsense will reboot automatically mid-update. Expect a connection loss of 2-5 minutes and confirm with `get_version` once the firewall is back.
+**Note on reboots:** When a pending update includes kernel or base packages, `check_updates` and `pre_upgrade_check` report that the update will reboot the system when applied — this is informational, not a blocker, and never requires rebooting beforehand. OPNsense reboots automatically mid-update: expect a connection loss of 2-5 minutes and confirm with `get_version` once the firewall is back. A "Reboot status: not required" means no reboot is outstanding from a previous operation.
 
 ---
 

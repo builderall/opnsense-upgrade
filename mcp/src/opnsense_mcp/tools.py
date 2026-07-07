@@ -414,7 +414,14 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
 
                 # Reboot status
                 reboot_info = api.check_needs_reboot()
-                if reboot_info["needs_reboot"] and not reboot_info["is_stale"]:
+                if reboot_info.get("pending_update_reboot"):
+                    # The pending batch will reboot the system when applied — expected
+                    # behavior, not a blocker. Never list it as an issue.
+                    lines.append(
+                        "Reboot:          pending update will reboot the system when "
+                        "applied (not a blocker)"
+                    )
+                elif reboot_info["needs_reboot"] and not reboot_info["is_stale"]:
                     lines.append(f"Reboot:          REQUIRED -- {reboot_info['explanation']}")
                     issues.append(f"Reboot required before upgrading.")
                 elif reboot_info["needs_reboot"] and reboot_info["is_stale"]:
