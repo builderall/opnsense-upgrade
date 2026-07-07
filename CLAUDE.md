@@ -44,19 +44,13 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 - Tags: v1.0 (initial) through v1.3 (latest)
 - Git user: builderall / 25215839+builderall@users.noreply.github.com (set locally, not globally)
 - Push with: `./push.sh` (uses gh CLI token, auto-creates repo if missing)
-
-### Commit History (local)
-
-| Hash | Message |
-|------|---------|
-| `43c5175` | Add MCP server for OPNsense API integration (**local only — not pushed yet**) |
-| `ad8f5b0` | Initial release: OPNsense enhanced upgrade script v1.0 (pushed, tagged v1.0) |
-
-**Note:** MCP server commit is being held locally until live testing via Claude Code session is complete.
+- All work is pushed; changes land on master via PRs (merge commits, e.g. #1-#3)
 
 ## MCP Server
 
-**Status: Built and smoke-tested against live OPNsense. Not yet tested via Claude Code session.**
+**Status: Live tested via Claude Code sessions — all read tools plus `run_update` exercised
+against the real firewall. Only `run_upgrade`/`reboot` execution remains untested (needs the
+26.7 major release).**
 
 ### Structure
 
