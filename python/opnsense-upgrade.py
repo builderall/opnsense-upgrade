@@ -343,7 +343,7 @@ class SystemInfo:
             # Run firmware check and status in one call to get fresh data
             status = self.sh.output("configctl firmware status", timeout=120, include_stderr=True)
             if status:
-                found_major, found_minor = self._parse_firmware(status, current)
+                found_major, found_minor = self.parse_firmware(status, current)
                 if minor_only:
                     found_major = None
 
@@ -407,7 +407,7 @@ class SystemInfo:
         if not has_minor and not has_major:
             self.log.success("System is up to date")
 
-    def _parse_firmware(self, status, current):
+    def parse_firmware(self, status, current):
         """Parse configctl firmware status output."""
         major = minor = None
         maj = min_ = ""
@@ -587,8 +587,12 @@ class StateManager:
             self.log.info(f"[DRY RUN] State checkpoint: {Stage.name(stage)}, Version {version}")
             return
         data = {"stage": stage, "version": version, "timestamp": int(time.time()), **flags}
-        with open(self.PATH, "w") as f:
+        # Write-then-rename so a crash mid-write cannot leave truncated JSON --
+        # this file's whole job is surviving reboots.
+        tmp_path = self.PATH + ".tmp"
+        with open(tmp_path, "w") as f:
             json.dump(data, f, indent=2)
+        os.replace(tmp_path, self.PATH)
         self.log.info(f"State saved: {Stage.name(stage)}, Version {version}")
 
     def load(self):
@@ -746,6 +750,11 @@ class OPNsenseUpgrade:
         self.log.header(Stage.name(Stage.CLEANUP))
         self.sh.run("pkg autoremove -y")
         self.sh.run("pkg clean -ay")
+        # Clearing /tmp is deliberate (stale firmware-daemon artifacts, pkg
+        # leftovers) but destructive on a live firewall: PHP session files go
+        # with it, so all Web UI users are logged out.
+        if not self.dry_run:
+            self.log.warning("Clearing /tmp and /var/tmp (Web UI sessions will be logged out)")
         self.sh.run("rm -rf /tmp/* /var/tmp/*")
         self.log.success("Cleanup completed")
         self.save(Stage.BACKUP)
@@ -1023,7 +1032,7 @@ class OPNsenseUpgrade:
         if shutil.which("configctl"):
             status = self.sh.output("configctl firmware status", timeout=120, include_stderr=True)
             if status:
-                _, minor = self.sys._parse_firmware(status, current)
+                _, minor = self.sys.parse_firmware(status, current)
                 if minor and minor != current:
                     return minor
 
@@ -1065,10 +1074,6 @@ class OPNsenseUpgrade:
 
     def run(self):
         os.makedirs(self.BACKUP_DIR, exist_ok=True)
-        if os.getuid() != 0:
-            print("This script must be run as root")
-            sys.exit(1)
-
         self.log.info(f"Script started at: {datetime.now()}")
         name = os.path.basename(self.script_path)
 
@@ -1084,8 +1089,10 @@ class OPNsenseUpgrade:
             self.log.success("State cleaned.")
             return
 
-        # -b standalone: just backup and exit
-        if self.backup and not self.minor and not self.target and not self.resume:
+        # -b standalone: just backup and exit. A bare -t sets wants_major with
+        # target=None — that is an auto-target upgrade request, not standalone.
+        if (self.backup and not self.minor and not self.target
+                and not self.wants_major and not self.resume):
             self._run_backup()
             return
 
@@ -1093,6 +1100,10 @@ class OPNsenseUpgrade:
         if self.resume:
             self.log.info("Resume mode requested")
             saved = self.state.load()
+            if saved and not ("stage" in saved and "version" in saved):
+                self.log.warning("State file is missing required fields -- ignoring it")
+                self.state.clear()
+                saved = None
             if saved:
                 self.current_stage = saved["stage"]
                 self.target = saved["version"]
@@ -1158,12 +1169,8 @@ class OPNsenseUpgrade:
                 self.log.error(f"Remove -m flag to perform major upgrade, or use -t to specify minor version")
                 sys.exit(1)
 
-            # Auto-detect minor mode if target is in the same branch
-            if not self.minor and current and self.sys.major(self.target) == self.sys.major(current):
-                self.log.info("Target is within current branch, using minor update mode")
-                self.minor = True
-
-        # Auto-detect minor mode when target is explicitly specified in same branch
+        # Auto-detect minor mode when the target is within the current branch
+        # (covers both auto-detected and explicitly specified targets)
         if not self.minor and self.target:
             current = self.sys.opnsense_version()
             if current and self.sys.major(self.target) == self.sys.major(current):
@@ -1193,7 +1200,7 @@ class OPNsenseUpgrade:
                 if pending_minor:
                     self.log.error(f"Minor update available: {current} -> {pending_minor}")
                     self.log.error("OPNsense requires all minor updates before a major upgrade")
-                    self.log.error(f"Run minor update first: {name} -x -m -b")
+                    self.log.error(f"Run minor update first: {name} -x -m")
                     sys.exit(1)
 
         # Check for existing in-progress upgrade
@@ -1287,6 +1294,12 @@ def main():
         sys.exit(0)
 
     args = parser.parse_args()
+    # Check root before constructing anything — Logger and the backup dir live
+    # under /var/log and /root, so a non-root run would die with a raw
+    # PermissionError traceback before any friendly message.
+    if os.getuid() != 0:
+        print("This script must be run as root")
+        sys.exit(1)
     upgrader = OPNsenseUpgrade(args)
     try:
         upgrader.run()
