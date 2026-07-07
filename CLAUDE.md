@@ -16,7 +16,10 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 - `mcp/SETUP.md` — Step-by-step setup guide for new users.
 - `mcp/src/opnsense_mcp/` — MCP server Python package (see MCP Server section below).
 - `.claude/skills/watch-update/` — Claude Code skill: follows a running update through the
-  mid-update reboot via a Monitor event stream (read-only polling script + SKILL.md).
+  mid-update reboot via a Monitor event stream. Watcher logic is `watch_update.py` (runs
+  from mcp/.venv, imports the MCP package — single source of truth for repo-error
+  detection and config); `watch-update.sh` is a thin launcher kept as the stable entry
+  point for the Monitor command and the PostToolUse hook.
 - `.claude/settings.json` — project hook: after `run_update`/`run_upgrade` actually triggers
   (response contains "triggered"; blocked/no-op responses are ignored), a PostToolUse hook
   injects an instruction to invoke the watch-update skill, so no update runs unwatched.
@@ -30,6 +33,26 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
 - No emojis in code or docs
 - Python script targets Python 3 on FreeBSD (OPNsense)
 - MCP server targets Python 3.10+ on user's workstation (Linux/WSL)
+
+### Language Policy
+
+Each language has a defined role — do not deviate for new components:
+
+| Language | Used for | Why |
+|---|---|---|
+| Python 3 (stdlib only) | `python/opnsense-upgrade.py` + its tests | Runs on the firewall (FreeBSD); no pip there |
+| Python 3.10+ (mcp/.venv) | `mcp/` package; any workstation tool with logic (e.g. the watch-update watcher) | One venv, one source of truth — tools import `Config`, `OPNsenseAPI`, `_repo_error` from the MCP package instead of re-implementing them |
+| bash | Orchestration and glue only: SSH drivers (`test-on-firewall.sh`, `run-upgrade-on-firewall.sh`), thin launchers, `push.sh` | Process/pipe wrangling is what shell is for; no business logic |
+| PowerShell | `ps1/` Windows-side recovery tools | Windows host is the runtime |
+
+Rules of thumb:
+- If a bash script needs `python3 -c` more than once, it should be a Python script with a
+  thin bash launcher (see `.claude/skills/watch-update/`).
+- Never re-implement MCP package logic (repo-error detection, .env parsing, API calls) in
+  another language — import it from `mcp/.venv` instead. The original bash watcher did,
+  and the duplicated `_repo_error()` signature was a standing drift risk until PR #12.
+- Launchers exist to keep stable entry points (Monitor commands, hooks, docs); keep them
+  under ~20 lines with no logic beyond path resolution and exec.
 
 ## OPNsense Context
 

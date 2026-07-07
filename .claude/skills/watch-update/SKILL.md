@@ -68,9 +68,16 @@ frozen. Recovery is manual, on the firewall via SSH as root:
 
 ## Notes
 
+- `watch-update.sh` is a thin launcher; the watcher logic is `watch_update.py`, run from
+  `mcp/.venv`. It imports the MCP package directly (`Config`, `OPNsenseAPI`,
+  `_repo_error`), so repo-error detection and config loading have a single source of
+  truth with the MCP server.
 - The script is read-only: it only GETs firmware status endpoints.
-- Credentials come from `mcp/.env`; the script never prints them.
+- Credentials come from `mcp/.env` via the MCP package loader (`OPNSENSE_*` environment
+  variables override it); the script never prints them.
 - Output is duplicated to `logs/watch-update-YYYYMMDD-HHMMSS.log`; a one-line result is
   appended to `logs/install-status.log`.
-- Env knobs: `ENV_FILE`, `POLL_SECONDS` (default 20), `STALL_AFTER` (300),
-  `MAX_SECONDS` (1800), `NO_RUN_AFTER` (90, wait for the run to appear before giving up).
+- Env knobs: `POLL_SECONDS` (default 20), `STALL_AFTER` (300), `MAX_SECONDS` (1800),
+  `NO_RUN_AFTER` (90, wait for the run to appear before giving up).
+- Regression tests: `test_watch_update.py` drives the full state machine with a fake API
+  (no firewall needed): `mcp/.venv/bin/python .claude/skills/watch-update/test_watch_update.py`
