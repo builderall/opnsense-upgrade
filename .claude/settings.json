@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__opnsense__run_update|mcp__opnsense__run_upgrade",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -c 'select((.tool_response // {} | tostring) | test(\"triggered\")) | {hookSpecificOutput: {hookEventName: \"PostToolUse\", additionalContext: \"An OPNsense firmware update/upgrade was just triggered. Invoke the watch-update skill now: arm a Monitor with bash .claude/skills/watch-update/watch-update.sh (see .claude/skills/watch-update/SKILL.md for timeouts and event handling), then verify the final version when a terminal event arrives.\"}}' 2>/dev/null || true",
+            "timeout": 10,
+            "statusMessage": "Arming watch-update reminder"
+          }
+        ]
+      }
+    ]
+  }
+}
