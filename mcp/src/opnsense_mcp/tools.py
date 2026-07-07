@@ -112,11 +112,9 @@ def _version_state(status: dict) -> dict:
         latest_minor and current_base and latest_minor != current_base
     )
     return {
-        "product": product,
         "current": current,
         "latest_minor": latest_minor,
         "next_major": product.get("CORE_NEXT", ""),
-        "current_base": current_base,
         "fw_status": fw_status,
         "has_minor": has_minor,
     }
@@ -176,18 +174,18 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
 
             elif name == "check_updates":
                 status = api.firmware_status()
-                product = status.get("product", {})
-                current = product.get("product_version", "unknown")
-                latest_minor = product.get("product_latest", "")
-                next_major = product.get("CORE_NEXT", "")
+                vs = _version_state(status)
+                current = vs["current"] or "unknown"
+                latest_minor = vs["latest_minor"]
+                next_major = vs["next_major"]
+                fw_status = vs["fw_status"]
                 upgrade_packages = status.get("upgrade_packages", [])
                 status_msg = status.get("status_msg", "")
-                fw_status = status.get("status", "none")
 
                 lines = [f"Current version: {current}"]
                 if fw_status == "update":
                     lines.append(f"Minor update available: {latest_minor} ({len(upgrade_packages)} packages)")
-                elif latest_minor and latest_minor != current.split("_")[0]:
+                elif vs["has_minor"]:
                     lines.append(f"Minor update available: {latest_minor}")
                 else:
                     lines.append("Minor update: up to date")
@@ -200,6 +198,11 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     lines.append("Major upgrade: none available")
 
                 lines.append(f"Status: {status_msg or 'no updates available'}")
+                if _repo_error(status):
+                    lines.append(
+                        "WARNING: a pkg repository is unreachable -- update/upgrade would hang "
+                        "on the catalog fetch. Run pre_upgrade_check for details."
+                    )
 
                 reboot_info = api.check_needs_reboot()
                 if reboot_info["needs_reboot"]:
@@ -223,7 +226,12 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 # A "running" status with an unreachable repo is the classic stall:
                 # pkg blocks on the catalog fetch and the log stops advancing.
                 if fw_status == "running":
-                    rerr = _repo_error(api.firmware_status())
+                    # Best-effort: a wedged pkg can also wedge the firmware API, and
+                    # this warning must not cost the status/log report already gathered.
+                    try:
+                        rerr = _repo_error(api.firmware_status())
+                    except Exception:
+                        rerr = None
                     if rerr:
                         lines.append(
                             f"\nWARNING: a pkg repository is unreachable ({rerr}). The run is "
