@@ -1,5 +1,6 @@
 .claude/*
 !.claude/skills/
+!.claude/settings.json
 .continue/
 __pycache__/
 *.pyc
