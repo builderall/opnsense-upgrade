@@ -159,6 +159,15 @@ else
     note "SKIP: $LOCAL_TESTS not found"
 fi
 
+# --- 7. Bare -t with -b must enter the upgrade flow, not standalone backup ---
+# Regression test for the flag collision fixed in PR #8: bare -t sets target=None,
+# which used to match the standalone-backup condition and silently skip the
+# upgrade. "No target version specified" is printed only by the upgrade flow —
+# the standalone backup path prints "Configuration Backup" instead.
+hdr "7. Dry-run -t -b (flag collision: upgrade flow, not standalone backup)"
+ssh -S "$SOCK" "$FW_HOST" "${REMOTE_SCRIPT} -t -b" \
+    | expect "bare -t with -b enters upgrade flow" "No target version specified"
+
 # --- Summary ---
 PASS="$(wc -l < "$PASS_FILE" | tr -d ' ')"
 FAIL="$(wc -l < "$FAIL_FILE" | tr -d ' ')"
