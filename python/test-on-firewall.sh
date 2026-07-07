@@ -126,10 +126,13 @@ PY
 rm -rf /tmp/repotest
 PYEOF
 
-# --- 2. Dry-run major upgrade to an unreleased version (mirror validation) ---
-hdr "2. Dry-run -t 26.7 (mirror validation rejects unreleased)"
-ssh -S "$SOCK" "$FW_HOST" "${REMOTE_SCRIPT} -t 26.7" \
-    | expect "rejects unreleased version" "not found on pkg mirror"
+# --- 2. Dry-run major upgrade to a nonexistent version (mirror validation) ---
+# 99.7 can never exist on the mirror, so this test stays valid across releases.
+# (It previously used 26.7, which would flip to a false failure the day
+# 26.7 actually shipped.)
+hdr "2. Dry-run -t 99.7 (mirror validation rejects nonexistent version)"
+ssh -S "$SOCK" "$FW_HOST" "${REMOTE_SCRIPT} -t 99.7" \
+    | expect "rejects nonexistent version" "not found on pkg mirror"
 
 # --- 3. Dry-run auto-detect major ---
 hdr "3. Dry-run -t (major auto-detect)"
