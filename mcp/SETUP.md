@@ -76,6 +76,12 @@ and the IP keeps the MCP server working even when local DNS is unavailable. A ho
 is only required if you set `OPNSENSE_VERIFY_SSL=true` with a real certificate — then
 the URL must match a name in the certificate.
 
+The self-signed certificate itself is nothing to worry about: OPNsense ships with one
+by default, and `OPNSENSE_VERIFY_SSL=false` is the intended setting for a LAN-only
+firewall. The connection is still TLS-encrypted — only the certificate identity check
+is skipped. Browser or curl warnings about the certificate are expected and harmless
+in this setup.
+
 ---
 
 ## Step 4: Test the API Key
