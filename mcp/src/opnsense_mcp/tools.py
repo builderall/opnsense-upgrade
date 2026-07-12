@@ -493,10 +493,13 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                         "applied (not a blocker)"
                     )
                 elif reboot_info["needs_reboot"] and not reboot_info["is_stale"]:
-                    lines.append(f"Reboot:          REQUIRED -- {reboot_info['explanation']}")
-                    issues.append(f"Reboot required before upgrading.")
+                    lines.append(f"Reboot:          {reboot_info['explanation']}")
+                    issues.append("Reboot required before upgrading.")
                 elif reboot_info["needs_reboot"] and reboot_info["is_stale"]:
-                    lines.append(f"Reboot:          flag set but stale, safe to ignore")
+                    lines.append(
+                        "Reboot:          not required (stale flag from before the last "
+                        "reboot; ignored)"
+                    )
                 else:
                     lines.append("Reboot:          not required")
 

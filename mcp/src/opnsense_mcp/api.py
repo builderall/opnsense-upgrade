@@ -177,9 +177,8 @@ class OPNsenseAPI:
                 "upgrade_needs_reboot": upgrade_needs_reboot,
                 "is_stale": False,
                 "pending_update_reboot": True,
-                "explanation": "needs_reboot refers to the pending update/upgrade: applying "
-                               f"it will reboot the system automatically ({cause}). "
-                               "No reboot is required beforehand.",
+                "explanation": "not required beforehand -- the pending update/upgrade "
+                               f"will reboot the system automatically when applied ({cause}).",
             }
 
         # upgrade_needs_reboot is OPNsense's authoritative signal that a just-applied
@@ -192,8 +191,8 @@ class OPNsenseAPI:
                 "is_stale": False,
                 "uptime_seconds": self.get_uptime_seconds(),
                 "last_check": last_check_str,
-                "explanation": "needs_reboot is set and upgrade_needs_reboot confirms a "
-                               "just-applied update requires a reboot. A reboot is required.",
+                "explanation": "REQUIRED -- a just-applied update needs a reboot "
+                               "(upgrade_needs_reboot is set).",
             }
 
         # If no packages are pending and system is up to date, the flag is a leftover artifact
@@ -210,8 +209,9 @@ class OPNsenseAPI:
                 "needs_reboot": True,
                 "upgrade_needs_reboot": upgrade_needs_reboot,
                 "is_stale": True,
-                "explanation": "needs_reboot is set but no packages are pending and system is up to date. "
-                               "Leftover flag from a previously applied update. Safe to ignore.",
+                "explanation": "not required -- ignore the needs_reboot flag: it is a stale "
+                               "leftover from an update that was already applied and rebooted, "
+                               "and clears on the next firmware check.",
             }
 
         uptime = self.get_uptime_seconds()
@@ -228,19 +228,19 @@ class OPNsenseAPI:
             if uptime < last_check_age:
                 is_stale = True
                 explanation = (
-                    f"needs_reboot is set but appears stale: system has been up "
-                    f"{uptime // 60}m, but last firmware check was {last_check_age // 60}m ago "
-                    f"(check predates this boot). Safe to ignore."
+                    f"not required -- ignore the needs_reboot flag: it predates this boot "
+                    f"(system up {uptime // 60}m, last firmware check {last_check_age // 60}m "
+                    f"ago)."
                 )
             else:
                 explanation = (
-                    f"needs_reboot is set and appears genuine: system has been up "
-                    f"{uptime // 60}m, last firmware check was {last_check_age // 60}m ago "
-                    f"(firmware daemon ran after this boot and still reports reboot needed). "
-                    f"A reboot is recommended."
+                    f"recommended -- the firmware check ran after this boot (system up "
+                    f"{uptime // 60}m, check {last_check_age // 60}m ago) and still reports "
+                    f"a reboot needed."
                 )
         else:
-            explanation = "needs_reboot is set. Could not determine if stale (uptime unavailable)."
+            explanation = ("unverifiable -- needs_reboot is set but uptime could not be read "
+                           "to check staleness. Treat as possibly requiring a reboot.")
 
         return {
             "needs_reboot": True,
