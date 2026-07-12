@@ -5,7 +5,7 @@ import httpx
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 
-from .api import OPNsenseAPI
+from .api import OPNsenseAPI, batch_summary
 from .config import Config
 
 # Tool definitions (name, description, input schema)
@@ -120,6 +120,51 @@ def _version_state(status: dict) -> dict:
     }
 
 
+def _package_lines(batch: dict) -> list[str]:
+    """One indented line per pending package: name, version change, repo, action."""
+    lines = []
+    for p in batch["packages"]:
+        if p["new_version"]:
+            change = f"{p['current_version']} -> {p['new_version']}"
+        else:
+            change = p["current_version"]
+        action = "" if p["action"] == "upgrade" else f" [{p['action']}]"
+        lines.append(f"  {p['name']:<24} {change}  ({p['repository']}){action}")
+    return lines
+
+
+def _update_lines(vs: dict, batch: dict) -> list[str]:
+    """Availability lines for check_updates.
+
+    Distinguishes a real OPNsense version bump from a batch where the version
+    stays put (e.g. a plugin-only SunnyValley/Zenarmor release, which the bare
+    'Minor update available: <version>' wording used to misrepresent as an
+    OPNsense point release — observed live with os-sensei 2.6.1, 2026-07-12).
+    """
+    current = vs["current"]
+    latest_minor = vs["latest_minor"]
+    current_base = current.split("_")[0] if current else ""
+    version_bump = bool(latest_minor and current_base and latest_minor != current_base)
+
+    if batch["packages"]:
+        n = len(batch["packages"])
+        if version_bump:
+            lines = [f"Minor update available: {latest_minor} ({n} packages)"]
+        elif batch["has_core"]:
+            lines = [f"Package updates available: {n} (OPNsense version stays {current})"]
+        else:
+            lines = [
+                f"Package updates available: {n} "
+                f"(third-party only, OPNsense stays {current})"
+            ]
+        lines.extend(_package_lines(batch))
+        return lines
+    if vs["has_minor"]:
+        # Stale daemon cache: product_latest is ahead but no package list yet.
+        return [f"Minor update available: {latest_minor}"]
+    return ["Minor update: up to date"]
+
+
 def _repo_blocked_text(status_msg: str) -> str:
     """Guidance shown when a write tool refuses because a repo is unreachable."""
     return (
@@ -176,19 +221,12 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 status = api.firmware_status()
                 vs = _version_state(status)
                 current = vs["current"] or "unknown"
-                latest_minor = vs["latest_minor"]
                 next_major = vs["next_major"]
                 fw_status = vs["fw_status"]
-                upgrade_packages = status.get("upgrade_packages", [])
                 status_msg = status.get("status_msg", "")
 
                 lines = [f"Current version: {current}"]
-                if fw_status == "update":
-                    lines.append(f"Minor update available: {latest_minor} ({len(upgrade_packages)} packages)")
-                elif vs["has_minor"]:
-                    lines.append(f"Minor update available: {latest_minor}")
-                else:
-                    lines.append("Minor update: up to date")
+                lines.extend(_update_lines(vs, batch_summary(status)))
 
                 if fw_status == "upgrade":
                     lines.append(f"Major upgrade available: {next_major} (use run_upgrade to upgrade)")
@@ -319,9 +357,15 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                     return text(_repo_blocked_text(rerr))
                 if not _version_state(status)["has_minor"]:
                     return text("System is already up to date. No update needed.")
+                batch = batch_summary(status)
                 result = api.firmware_update()
                 msg = result.get("msg", "") or result.get("status", str(result))
-                return text(f"Update triggered: {msg}\n\nUse upgrade_status to monitor progress.")
+                lines = [f"Update triggered: {msg}"]
+                if batch["packages"]:
+                    lines.append("\nApplying:")
+                    lines.extend(_package_lines(batch))
+                lines.append("\nUse upgrade_status to monitor progress.")
+                return text("\n".join(lines))
 
             elif name == "run_upgrade":
                 check_writable()
@@ -394,10 +438,37 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                         "third-party repo (e.g. SunnyValley/Zenarmor) before updating."
                     )
 
-                # Minor updates pending?
-                if has_minor:
-                    lines.append(f"Minor update:    {latest_minor} -- PENDING (must apply before major upgrade)")
-                    issues.append(f"Minor update pending ({current} -> {latest_minor}). Run run_update first.")
+                # Minor updates pending? Distinguish a version bump from a plugin-only
+                # batch (OPNsense version unchanged) — both must be applied before a
+                # major upgrade, but they read very differently.
+                batch = batch_summary(status)
+                current_base = current.split("_")[0]
+                pending_line = (
+                    f"Minor update:    {latest_minor} -- PENDING "
+                    "(must apply before major upgrade)"
+                )
+                pending_issue = (
+                    f"Minor update pending ({current} -> {latest_minor}). "
+                    "Run run_update first."
+                )
+                if has_minor and latest_minor and latest_minor != current_base:
+                    lines.append(pending_line)
+                    lines.extend(_package_lines(batch))
+                    issues.append(pending_issue)
+                elif has_minor and batch["packages"]:
+                    n = len(batch["packages"])
+                    scope = "" if batch["has_core"] else "third-party only, "
+                    lines.append(
+                        f"Package updates: {n} pending ({scope}OPNsense stays {current})"
+                    )
+                    lines.extend(_package_lines(batch))
+                    names = ", ".join(p["name"] for p in batch["packages"][:5])
+                    issues.append(
+                        f"Package updates pending ({names}). Run run_update first."
+                    )
+                elif has_minor:
+                    lines.append(pending_line)
+                    issues.append(pending_issue)
                 else:
                     lines.append("Minor update:    up to date")
 
