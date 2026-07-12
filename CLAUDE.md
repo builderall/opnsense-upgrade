@@ -190,6 +190,15 @@ Privileges required:
 - `needs_reboot: 1` in firmware status after 26.1.2 upgrade: **leftover artifact** — UI shows no reboot needed. The flag persists in the cached API response even after the reboot. Fixed in `api.py`: if no packages are pending and `status == 'none'`, flag is treated as stale regardless of timing.
 - Reboot staleness logic in `api.py` (four-stage): (1) **pending packages + `status` in (`update`, `upgrade`) => `pending_update_reboot`** — the flag describes the *upcoming* batch ("applying this will reboot"), informational, never an issue; the explanation attributes the reboot via `batch_summary()` (kernel/base/core vs plugin-only, naming the packages); (2) **`upgrade_needs_reboot == '1'` => genuine, never stale** — OPNsense's authoritative signal that a just-applied update (e.g. a kernel bump) requires a reboot; this overrides the version-match path so a real post-update reboot is never hidden; (3) if no pending packages + (`status == 'none'` or current==latest) => leftover artifact, safe to ignore; (4) else compare uptime vs last_check_age — if `uptime < last_check_age`, check predates this boot => stale; if `uptime > last_check_age`, daemon ran after boot => genuine.
 - Unreachable third-party pkg repo (SunnyValley/Zenarmor) hangs both the web UI and `pkg` — `pkg` fetches every repo catalog before installing. Symptom: `check_updates` reports `status_msg` "Could not find the repository on the selected mirror" and an `update`/`upgrade` trigger never produces log output past the first two lines. `pre_upgrade_check` now detects this in `status_msg` (keyword `repositor` + an error word) and forces a NOT-READY verdict. Fix on the firewall: `mv /usr/local/etc/pkg/repos/SunnyValley.conf{,.disabled}`, retry, then re-enable. The python script also probes repo reachability in pre-checks. (Incident: 2026-06-28 during the 26.1.8_5 -> 26.1.10 update.)
+- Zenarmor post-install deadlock (incident 2026-07-12, os-sensei 2.6 -> 2.6.1): the update
+  hung ~25 min with `upgradestatus` stuck on `running` after "check-fix done". pkg waits for
+  Zenarmor's `post-install.sh` -> `CLI.php` -> `CLIResolv.php`, whose `killbypid()` loop
+  spins on `kill -0` against an unbound pid that was a *zombie child of pkg itself* — only
+  pkg can reap it, and pkg is the one waiting. Diagnose over SSH (`pgrep -lP <pkg-pid>`
+  shows daemons/zombies as pkg children; `procstat kstack` walks the chain); fix by killing
+  the leaf `CLIResolv.php`, after which pkg finishes and the batch's auto-reboot fires. The
+  agent package may land post-reboot via Zenarmor's `.senpaimustupdate` force-reinstall, so
+  verify versions a few minutes after boot.
 - Post-reboot `upgradestatus` residue: right after a reboot the endpoint reports
   `status: "error"` with an empty log — stale residue from the pre-reboot run, not a failure.
   The watch-update skill script ignores terminal statuses until it has seen the run start.
