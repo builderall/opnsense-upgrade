@@ -69,6 +69,13 @@ echo ".env created."
 
 The `.env` file is already listed in `.gitignore` — it will not be pushed to GitHub.
 
+Connecting by IP address is fine — the MCP server does not need a DNS name. With
+`OPNSENSE_VERIFY_SSL=false` (the default for OPNsense's self-signed certificate) no
+certificate name check happens, so `https://<ip>` behaves identically to a hostname,
+and the IP keeps the MCP server working even when local DNS is unavailable. A hostname
+is only required if you set `OPNSENSE_VERIFY_SSL=true` with a real certificate — then
+the URL must match a name in the certificate.
+
 ---
 
 ## Step 4: Test the API Key

@@ -164,7 +164,11 @@ Privileges required:
 - `run_update` exercised live during the 26.1.8_5 -> 26.1.10 minor update — trigger, duplicate-run guard, and "already up to date" guard all confirmed.
 - `check_services` and `get_config_backup` removed — both require admin-level API access not grantable via restricted keys.
 - Path expansion confirmed — `~` expands correctly in `bash -c "cd ~/..."` args.
-- mcp/.env URL confirmed — `https://192.168.1.1` working.
+- mcp/.env URL confirmed — `https://192.168.1.1` working. The IP form is preferred: MCP
+  commands need no DNS. With `OPNSENSE_VERIFY_SSL=false` (self-signed cert) there is no
+  certificate name check, so IP and hostname behave identically, and the IP keeps MCP
+  usable when local DNS (`OPNsense.home.lan`) is unresolvable, e.g. mid-upgrade or with
+  Unbound down.
 - Error handling added — graceful messages for ConnectError, TimeoutException, HTTPStatusError.
 - Safety guards on write tools — blocks duplicate runs, pending minor updates before major upgrade, unreleased versions.
 - mcp/README.md added — user-facing README for the mcp/ directory.
