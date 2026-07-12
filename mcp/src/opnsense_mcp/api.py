@@ -8,6 +8,47 @@ import httpx
 
 from .config import Config
 
+# Package names that mean the batch touches the OS itself (version bump and/or
+# kernel/base reboot), as opposed to a plugin-only batch from a third-party repo.
+CORE_PACKAGE_NAMES = {"base", "kernel"}
+CORE_PACKAGE_PREFIX = "opnsense"
+
+
+def batch_summary(status: dict[str, Any]) -> dict[str, Any]:
+    """Summarize the pending package batch in a firmware status response.
+
+    Returns dict with:
+      packages: [{action, name, current_version, new_version, repository}, ...]
+      has_core: True when the batch includes base, kernel, or an opnsense* package
+      repos:    sorted unique repository names in the batch
+
+    A batch with has_core=False is plugin-only (e.g. a SunnyValley/Zenarmor
+    release): the OPNsense version does not change, and any needs_reboot flag
+    is requested by the plugin, not by a kernel/base update.
+    """
+    packages = []
+    for action, key in (
+        ("upgrade", "upgrade_packages"),
+        ("install", "new_packages"),
+        ("reinstall", "reinstall_packages"),
+        ("downgrade", "downgrade_packages"),
+        ("remove", "remove_packages"),
+    ):
+        for p in status.get(key) or []:
+            packages.append({
+                "action": action,
+                "name": p.get("name", "?"),
+                "current_version": p.get("current_version", ""),
+                "new_version": p.get("new_version", ""),
+                "repository": p.get("repository", ""),
+            })
+    has_core = any(
+        p["name"] in CORE_PACKAGE_NAMES or p["name"].startswith(CORE_PACKAGE_PREFIX)
+        for p in packages
+    )
+    repos = sorted({p["repository"] for p in packages if p["repository"]})
+    return {"packages": packages, "has_core": has_core, "repos": repos}
+
 
 class OPNsenseAPI:
     def __init__(self, config: Config):
@@ -115,28 +156,30 @@ class OPNsenseAPI:
         if not needs_reboot:
             return {"needs_reboot": False, "is_stale": False, "explanation": "No reboot required."}
 
-        pending_packages = any([
-            status.get("upgrade_packages"),
-            status.get("new_packages"),
-            status.get("reinstall_packages"),
-            status.get("downgrade_packages"),
-            status.get("remove_packages"),
-        ])
+        batch = batch_summary(status)
+        pending_packages = bool(batch["packages"])
 
         # With a pending update/upgrade batch, needs_reboot describes the *upcoming*
-        # run ("applying this will reboot the system", e.g. kernel/base included) —
-        # not an outstanding reboot. It must not read as "reboot before updating":
-        # OPNsense reboots automatically mid-update. Observed live before the
-        # 26.1.10 -> 26.1.11 update (2026-07-06).
+        # run ("applying this will reboot the system") — not an outstanding reboot.
+        # It must not read as "reboot before updating": OPNsense reboots
+        # automatically mid-update. Observed live before the 26.1.10 -> 26.1.11
+        # update (2026-07-06). A plugin-only batch can set it too (e.g. os-sensei
+        # 2.6.1, whose engine reloads kernel modules) — attribute it correctly so
+        # it does not read as a kernel/base update.
         if pending_packages and status.get("status") in ("update", "upgrade"):
+            if batch["has_core"]:
+                cause = "kernel/base/core packages in the batch"
+            else:
+                names = ", ".join(p["name"] for p in batch["packages"][:5])
+                cause = f"requested by pending plugin package(s) {names}; no kernel/base change"
             return {
                 "needs_reboot": True,
                 "upgrade_needs_reboot": upgrade_needs_reboot,
                 "is_stale": False,
                 "pending_update_reboot": True,
                 "explanation": "needs_reboot refers to the pending update/upgrade: applying "
-                               "it will reboot the system automatically (kernel/base in the "
-                               "batch). No reboot is required beforehand.",
+                               f"it will reboot the system automatically ({cause}). "
+                               "No reboot is required beforehand.",
             }
 
         # upgrade_needs_reboot is OPNsense's authoritative signal that a just-applied

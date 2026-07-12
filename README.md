@@ -32,13 +32,13 @@ Connects Claude directly to your OPNsense firewall via its REST API. Once regist
 | Tool | Type | Description |
 |------|------|-------------|
 | `get_version` | read | Current OPNsense version, FreeBSD base, next major version |
-| `check_updates` | read | Minor/major update availability and reboot status |
+| `check_updates` | read | Minor/major update availability, pending package list (name, versions, repo), and reboot status; distinguishes plugin-only batches from OPNsense version bumps |
 | `pre_upgrade_check` | read | Pre-upgrade health assessment with go/no-go verdict (flags pending minor updates, genuine reboots, unreachable repos, in-progress upgrades, obsolete py37 packages) |
 | `upgrade_status` | read | Monitor an in-progress upgrade |
 | `get_changelog` | read | Changelog for a specific version |
 | `list_packages` | read | Installed packages with versions |
 | `system_info` | read | Uptime, load average, top processes |
-| `run_update` | write | Trigger minor update (requires confirmation) — may reboot if kernel/base packages are updated |
+| `run_update` | write | Trigger minor update (requires confirmation) — lists the package batch being applied; may reboot if kernel/base packages are updated |
 | `run_upgrade` | write | Trigger major upgrade (requires confirmation) |
 | `reboot` | write | Reboot the firewall (requires confirmation) |
 

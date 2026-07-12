@@ -89,9 +89,11 @@ mcp/
 ├── requirements.txt              # mcp, httpx, pydantic
 ├── pyproject.toml
 ├── SETUP.md                      # user setup guide
+├── tests/
+│   └── test_batch_summary.py     # pending-batch reporting tests (no network; run via .venv)
 └── src/opnsense_mcp/
     ├── config.py                 # loads mcp/.env, pydantic Config model
-    ├── api.py                    # OPNsenseAPI class — all HTTP calls + reboot staleness logic
+    ├── api.py                    # OPNsenseAPI class — HTTP calls, reboot staleness, batch_summary()
     ├── tools.py                  # 10 MCP tools registered via list_tools/call_tool decorators
     └── server.py                 # asyncio entry point, started by Claude Code via settings.json
 ```
@@ -150,6 +152,14 @@ Privileges required:
 
 ### Completed MCP Work
 
+- Pending-batch reporting (2026-07-12) — `check_updates`/`pre_upgrade_check`/`run_update` now
+  list every pending package (name, version change, repo, action) and classify the batch via
+  shared `batch_summary()` in `api.py` (core = `base`/`kernel`/`opnsense*`). A plugin-only
+  batch no longer reads as an OPNsense point release ("Minor update available: 26.1.11" when
+  the version would not change), and `check_needs_reboot()` attributes a pending-batch reboot
+  to the packages requesting it. Incident: os-sensei/os-sensei-agent 2.6 -> 2.6.1 (SunnyValley,
+  173 MiB, reboot flagged) looked like a kernel/base minor update. Tests:
+  `mcp/tests/test_batch_summary.py` (fixture = live incident data, no network).
 - Live tested all 10 read tools against OPNsense 26.1.2 via Claude Code VSCode session — all working.
 - `run_update` exercised live during the 26.1.8_5 -> 26.1.10 minor update — trigger, duplicate-run guard, and "already up to date" guard all confirmed.
 - `check_services` and `get_config_backup` removed — both require admin-level API access not grantable via restricted keys.
@@ -178,7 +188,7 @@ Privileges required:
 ## MCP API Notes
 
 - `needs_reboot: 1` in firmware status after 26.1.2 upgrade: **leftover artifact** — UI shows no reboot needed. The flag persists in the cached API response even after the reboot. Fixed in `api.py`: if no packages are pending and `status == 'none'`, flag is treated as stale regardless of timing.
-- Reboot staleness logic in `api.py` (four-stage): (1) **pending packages + `status` in (`update`, `upgrade`) => `pending_update_reboot`** — the flag describes the *upcoming* batch ("applying this will reboot"), informational, never an issue; (2) **`upgrade_needs_reboot == '1'` => genuine, never stale** — OPNsense's authoritative signal that a just-applied update (e.g. a kernel bump) requires a reboot; this overrides the version-match path so a real post-update reboot is never hidden; (3) if no pending packages + (`status == 'none'` or current==latest) => leftover artifact, safe to ignore; (4) else compare uptime vs last_check_age — if `uptime < last_check_age`, check predates this boot => stale; if `uptime > last_check_age`, daemon ran after boot => genuine.
+- Reboot staleness logic in `api.py` (four-stage): (1) **pending packages + `status` in (`update`, `upgrade`) => `pending_update_reboot`** — the flag describes the *upcoming* batch ("applying this will reboot"), informational, never an issue; the explanation attributes the reboot via `batch_summary()` (kernel/base/core vs plugin-only, naming the packages); (2) **`upgrade_needs_reboot == '1'` => genuine, never stale** — OPNsense's authoritative signal that a just-applied update (e.g. a kernel bump) requires a reboot; this overrides the version-match path so a real post-update reboot is never hidden; (3) if no pending packages + (`status == 'none'` or current==latest) => leftover artifact, safe to ignore; (4) else compare uptime vs last_check_age — if `uptime < last_check_age`, check predates this boot => stale; if `uptime > last_check_age`, daemon ran after boot => genuine.
 - Unreachable third-party pkg repo (SunnyValley/Zenarmor) hangs both the web UI and `pkg` — `pkg` fetches every repo catalog before installing. Symptom: `check_updates` reports `status_msg` "Could not find the repository on the selected mirror" and an `update`/`upgrade` trigger never produces log output past the first two lines. `pre_upgrade_check` now detects this in `status_msg` (keyword `repositor` + an error word) and forces a NOT-READY verdict. Fix on the firewall: `mv /usr/local/etc/pkg/repos/SunnyValley.conf{,.disabled}`, retry, then re-enable. The python script also probes repo reachability in pre-checks. (Incident: 2026-06-28 during the 26.1.8_5 -> 26.1.10 update.)
 - Post-reboot `upgradestatus` residue: right after a reboot the endpoint reports
   `status: "error"` with an empty log — stale residue from the pre-reboot run, not a failure.
