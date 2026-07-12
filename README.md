@@ -80,11 +80,30 @@ See [ps1/README.md](ps1/README.md) for details.
 
 ---
 
+## SSH Troubleshooting Wrapper
+
+`fw.sh` opens one authenticated SSH ControlMaster connection to the firewall and
+reuses it for troubleshooting. It shares its socket path with the `python/` SSH
+drivers, so `./fw.sh open` also unlocks `test-on-firewall.sh` and
+`run-upgrade-on-firewall.sh`.
+
+```sh
+./fw.sh open                            # authenticate once (idles out after 1h)
+./fw.sh run 'opnsense-version; uname -r'
+./fw.sh sh <<'EOF'                      # remote /bin/sh (avoids tcsh quirks)
+ps -auxww | grep pkg
+EOF
+./fw.sh help                            # full usage and examples
+```
+
+---
+
 ## Project Structure
 
 ```
 opnsense-upgrade/
 ├── README.md
+├── fw.sh                             # SSH ControlMaster wrapper (troubleshooting)
 ├── python/
 │   ├── README.md                     # Full upgrade script documentation
 │   └── opnsense-upgrade.py          # Main upgrade script (runs on OPNsense)

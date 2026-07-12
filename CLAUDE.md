@@ -24,6 +24,10 @@ Multi-tool project for managing OPNsense firewall upgrades. Three components:
   (response contains "triggered"; blocked/no-op responses are ignored), a PostToolUse hook
   injects an instruction to invoke the watch-update skill, so no update runs unwatched.
 - `push.sh` — Push to GitHub using gh CLI token (auto-creates repo on first run).
+- `fw.sh` — SSH ControlMaster wrapper for firewall troubleshooting (open/status/run/sh/
+  shell/close). Shares `/tmp/opnsense.sock` with the `python/` SSH drivers, so
+  `./fw.sh open` replaces opening the socket manually in a separate terminal. Use
+  `./fw.sh sh` with a heredoc for anything non-trivial (remote login shell is tcsh).
 
 ## Conventions
 
