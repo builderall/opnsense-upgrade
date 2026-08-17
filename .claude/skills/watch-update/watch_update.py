@@ -27,8 +27,10 @@ import time
 from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
-MCP_DIR = os.path.join(ROOT, "mcp")
+# The skill lives at <repo>/.claude/skills/watch-update/
+# Project root is three levels up: skill -> skills -> .claude -> repo
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
+MCP_DIR = os.path.join(PROJECT_ROOT, "mcp")
 sys.path.insert(0, MCP_DIR)
 
 import httpx  # noqa: E402  (from the mcp venv)
@@ -36,7 +38,7 @@ from src.opnsense_mcp.api import OPNsenseAPI  # noqa: E402
 from src.opnsense_mcp.config import Config  # noqa: E402
 from src.opnsense_mcp.tools import _repo_error  # noqa: E402
 
-LOGS_DIR = os.path.join(ROOT, "logs")
+LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 LOG_FILE = os.path.join(
     LOGS_DIR, f"watch-update-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
