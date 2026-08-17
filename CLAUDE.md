@@ -61,13 +61,22 @@ Rules of thumb:
 ## OPNsense Context
 
 - Firewall hostname: `OPNsense.home.lan` (user's local DNS)
-- Current version: 26.1.11_6 (incrementally updated from 26.1.1 during development)
+- Current version: 26.1.11_10 (incrementally updated from 26.1.1 during development)
 - Next major version: 26.7 (confirmed via API `CORE_NEXT` field)
 - Version format: YY.M.P (e.g., 26.1.2) with pkg revision suffix `_N` (e.g., 26.1.2_5) — always strip suffix for comparisons
 - Minor updates: within same branch (26.1.1 -> 26.1.2)
 - Major upgrades: across branches (26.1 -> 26.7), require base/kernel upgrade + reboot
 - OPNsense REST API at `/api/core/firmware/` — confirmed working
 - `pkg` can break after base/kernel upgrade due to ABI mismatch — the python script handles this
+- `pkg rquery` segfaults a child process on **every** call on this firewall (seen on
+  26.1.11_10 / pkg 2.6.2_1, issue #20, closed undiagnosed). It usually prints the correct
+  result and *then* segfaults, but a glob pattern (`'os-sensei*'`) returned no output at
+  all — and the exit code stays `0` either way. Root cause unknown; never established
+  whether it is a pkg bug or specific to this box. **Treat empty output from any `pkg`
+  query as a failed query, never as "not found"**, and do not trust `rc` alone. Two places
+  already do: `SystemInfo._pkg_rquery_version()` warns and returns `""`; and
+  `base_upgraded_ahead()` returns False when `pkg query` yields nothing, so a broken pkg
+  refuses to resume rather than guessing.
 
 ## GitHub
 
@@ -188,13 +197,19 @@ Privileges required:
 
 ## Testing Status (python script)
 
-- **Deployed on firewall:** v1.3 with PR #8 fixes, copied to `/root/opnsense-upgrade.py`
-  on 2026-07-06 (md5-verified, compile + `-l` smoke-tested live). The firewall copy does
-  NOT auto-update — redeploy after every merged change to `python/opnsense-upgrade.py`
-  via `python/test-on-firewall.sh --deploy` (needs the SSH control socket open; the v1.0
-  copy sat stale on the firewall for months before this was caught).
+- **Deployed on firewall:** master with PR #21 and #23, copied to `/root/opnsense-upgrade.py`
+  on 2026-08-17 (md5 `a562ac2c73f56f701c97d29e035d353f`, full firewall suite 7/0). The
+  firewall copy does NOT auto-update — redeploy after every merged change to
+  `python/opnsense-upgrade.py` via `python/test-on-firewall.sh --deploy` (needs the SSH
+  control socket open; the v1.0 copy sat stale on the firewall for months before this was
+  caught, and the v1.3 copy again for six weeks until 2026-08-17).
 - Minor update (26.1.1 -> 26.1.2) tested successfully on OPNsense 26.1
-- `pkg rquery '%v' opnsense` confirmed as reliable minor version detection fallback
+- `pkg rquery '%v' opnsense` returns the right value for minor version detection, but is
+  NOT reliable in the unqualified sense this line used to claim — it segfaults a child
+  process on every call (see OPNsense Context above). It is one of three cascading methods
+  (`pkg rquery` -> `pkg search` -> mirror probe); Methods A and B both go through the same
+  pkg machinery, so pkg breakage costs speed, not accuracy — the mirror probe is
+  network-based and independent.
 - Reboot detection (`"please reboot" in output`) logic correct but untested — minor update did not change the FreeBSD kernel so no reboot was triggered
 - Auto-resume via `/etc/rc.local.d/` not yet tested — needs a major upgrade with actual base/kernel reboot to verify. If it fails, user must manually run `./opnsense-upgrade.py -x -r` after reboot.
 
