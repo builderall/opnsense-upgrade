@@ -25,6 +25,11 @@ while a pkg repo is unreachable -- the Zenarmor/SunnyValley incident).
    - timeout_ms: `1500000` (25 min) for a minor update; `3600000` for a major upgrade
      (also pass `MAX_SECONDS=3300` in the command environment so the script's own
      give-up deadline stays inside the Monitor timeout)
+   - **Use the major-upgrade values (`3600000` + `MAX_SECONDS=3300`) for ANY batch
+     containing `os-sensei`, even a minor update.** Zenarmor's post-install deadlock (see
+     Recovery below) has burned 5-25 min on its own before the reboot even starts, so 25
+     min is not enough. Check the package list from `check_updates` / `run_update` before
+     choosing.
    - persistent: `false`
    - description: `OPNsense update: reboot drop, back-online version, done/error`
 
@@ -40,7 +45,8 @@ while a pkg repo is unreachable -- the Zenarmor/SunnyValley incident).
    | `Firewall BACK ONLINE after reboot -- version: X` | Terminal. Go to step 4. |
    | `Update finished (status=done, ...)` | Terminal, no reboot happened. Go to step 4. |
    | `Update FAILED (status=error)` + log lines | Terminal. Show the log to the user. |
-   | `WARNING: log stalled ... repo is unreachable` | Stalled update. See Recovery below. |
+   | `WARNING: log stalled ... repo is unreachable` | Repo unreachable. See Recovery A. |
+   | `WARNING: log has not advanced in Ns` (no repo) | Post-install deadlock. See Recovery B. |
    | `No update run detected within Ns` | Nothing started. Was the trigger successful? |
    | `GAVE UP after Ns` | Not terminal. Check `upgrade_status` and the firewall manually. |
 
@@ -56,7 +62,7 @@ while a pkg repo is unreachable -- the Zenarmor/SunnyValley incident).
 
 5. **Report** the version transition, whether a reboot occurred, and any warnings.
 
-## Recovery: stalled update (unreachable repo)
+## Recovery A: stalled update (unreachable repo)
 
 pkg fetches every configured repo's catalog before installing, so one unreachable
 third-party repo (historically SunnyValley/Zenarmor) hangs the whole run with the web UI
@@ -65,6 +71,32 @@ frozen. Recovery is manual, on the firewall via SSH as root:
 1. Kill the stuck pkg process.
 2. `mv /usr/local/etc/pkg/repos/SunnyValley.conf{,.disabled}`
 3. Re-run the update, then re-enable the repo afterwards.
+
+## Recovery B: Zenarmor post-install deadlock
+
+Different failure, different fix -- do NOT disable the repo here. The catalogues fetched
+fine and the download completed; pkg is stuck in post-install. Recurs on every `os-sensei`
+update and never self-clears.
+
+Signature: log frozen right after `CLI check-fix done`, status still `running`, and the
+stall warning mentions no repo error. Zenarmor's `killbypid()` loop spins on `kill -0`
+against a resolver pid that is already a zombie child of pkg -- only pkg can reap it, and
+pkg is the one waiting.
+
+Diagnose read-only over SSH (see `fw.sh` in the project root):
+
+```
+ps -ax -o pid,ppid,stat,wchan,command | grep -E 'pkg|php|sensei'
+ps -ax -o pid,ppid,stat,command | awk '$3 ~ /Z/'
+```
+
+The chain is `pkg-static` (wait/select) -> `post-install.sh` -> `CLI.php` (piperd) ->
+`CLIResolv.php` (nanslp). Fix: plain `kill <CLIResolv.php pid>` -- SIGTERM has been enough
+every time; verify the pid still maps to `CLIResolv.php` immediately before killing. pkg
+then reaps the zombies, finishes, and the batch's automatic reboot fires.
+
+Expect DNS to be down during the hang (the zombies are `unbound`/`dnsmasq`), and expect
+post-install to advance to a new step that may park again -- same fix, new pid.
 
 ## Notes
 
