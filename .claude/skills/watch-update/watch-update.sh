@@ -3,8 +3,8 @@
 #
 # The watcher logic lives in watch_update.py, which runs from mcp/.venv and
 # imports the MCP package so repo-error detection, config loading, and API
-# access have a single source of truth. This wrapper exists so the Monitor
-# command, SKILL.md, and the PostToolUse hook keep a stable entry point.
+# access have a single source of truth. This wrapper exists so commands keep
+# a stable entry point.
 
 set -u
 
