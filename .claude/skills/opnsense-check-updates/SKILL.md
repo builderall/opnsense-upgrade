@@ -16,42 +16,16 @@ fallback that talks to the same `mcp/` package without going through the MCP pro
 ## Quick Command
 
 ```bash
-cd <project-root>/mcp && .venv/bin/python3 -c "
-import sys; sys.path.insert(0, 'src')
-from opnsense_mcp.config import Config
-from opnsense_mcp.api import OPNsenseAPI
-from opnsense_mcp.tools import _version_state, batch_summary, _update_lines, _repo_error
-
-config = Config.from_env()
-api = OPNsenseAPI(config)
-status = api.firmware_status()
-
-vs = _version_state(status)
-batch = batch_summary(status)
-
-lines = [f'Current version: {vs[\"current\"] or \"unknown\"}']
-lines.extend(_update_lines(vs, batch))
-if vs['fw_status'] == 'upgrade':
-    lines.append(f'Major upgrade available: {vs[\"next_major\"]}')
-elif vs['next_major']:
-    lines.append(f'Next major version: {vs[\"next_major\"]} (planned)')
-else:
-    lines.append('Major upgrade: none available')
-lines.append(f'Status: {status.get(\"status_msg\", \"\") or \"no updates\"}')
-
-if _repo_error(status):
-    lines.append('WARNING: repo unreachable')
-
-reboot = api.check_needs_reboot()
-lines.append(f'Reboot: {reboot[\"explanation\"]}')
-print('\\n'.join(lines))
-"
+<project-root>/.claude/skills/opnsense-check-updates/check_updates.sh
 ```
 
-Replace `<project-root>` with the repo root (e.g. `~/projects/opnsense-upgrade`). Must run
-via `mcp/.venv/bin/python3`, not the system `python3` -- the venv is the only place
-`httpx`/`pydantic`/`mcp` are guaranteed to be installed at the versions this package expects.
-If `.venv/bin/python3` is missing, see `mcp/SETUP.md`.
+Replace `<project-root>` with the repo root (e.g. `~/projects/opnsense-upgrade`). The
+launcher resolves its own paths, so it runs from any working directory.
+
+`check_updates.sh` is a thin launcher; the report logic is `check_updates.py`, run from
+`mcp/.venv`. It imports the MCP package (`Config`, `OPNsenseAPI`, `_version_state`,
+`batch_summary`, `_update_lines`, `_repo_error`), so the output matches the `check_updates`
+MCP tool instead of re-deriving version state or repo-error detection separately.
 
 ## Output Format
 
@@ -63,10 +37,13 @@ If `.venv/bin/python3` is missing, see `mcp/SETUP.md`.
 
 ## Common Pitfalls
 
-- Running with system `python3` instead of `mcp/.venv/bin/python3` -- will fail with
-  `ModuleNotFoundError` unless the same packages happen to be installed globally.
-- `Config.from_env()` raises `ValueError` if `mcp/.env` is missing or incomplete; check
-  `mcp/SETUP.md` if the command errors out instead of printing a report.
+- Running `check_updates.py` with system `python3` instead of through the launcher -- will
+  fail with `ModuleNotFoundError` unless the same packages happen to be installed globally.
+  The launcher exists to prevent this; invoke it rather than the `.py` directly.
+- A missing `mcp/.venv` makes the launcher exit 1 with the venv path it looked for; see
+  `mcp/SETUP.md`.
+- Missing or incomplete `mcp/.env` exits 2 with the `Config.from_env()` message rather than
+  a traceback. An unreachable firewall exits 1.
 
 ## Verification Checklist
 
