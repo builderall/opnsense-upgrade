@@ -548,6 +548,30 @@ class SystemInfo:
                 found_major = latest
         return found_major, found_minor
 
+    def base_kernel_major(self):
+        """Major version of the installed base/kernel packages, "" if unknown."""
+        for pkg in ("base", "kernel"):
+            v = self.sh.output(f"pkg query '%v' {pkg} 2>/dev/null")
+            if v:
+                return self.major(v)
+        return ""
+
+    def base_upgraded_ahead(self, current, target_version):
+        """True when base/kernel are already on the target major but packages are not.
+
+        A differing major between the running version and the target is NOT evidence
+        that an upgrade was started — it is the normal state whenever a next major is
+        announced but not installed. Only the installed base/kernel packages sitting on
+        the target major means a base/kernel upgrade actually completed.
+        """
+        if not (current and target_version):
+            return False
+        base_major = self.base_kernel_major()
+        if not base_major:
+            return False
+        return (base_major == self.major(target_version)
+                and base_major != self.major(current))
+
     def detect_state(self, target_version):
         """Detect upgrade state for resume without state file."""
         self.log.header("Detecting System State")
@@ -577,9 +601,13 @@ class SystemInfo:
         # Check if base/kernel already upgraded but packages still on old branch
         # (handles same-FreeBSD-major upgrades, e.g., 25.7->26.1 both on FreeBSD 14)
         if target_version and current and self.major(current) != self.major(target_version):
-            self.log.warning(f"Packages on {self.major(current)} but target is {self.major(target_version)}")
-            self.log.info("Base/kernel likely already upgraded. Resuming from pkg fix.")
-            return Stage.FIX_PKG
+            if self.base_upgraded_ahead(current, target_version):
+                self.log.warning(f"Packages on {self.major(current)} but target is "
+                                 f"{self.major(target_version)}")
+                self.log.info("Base/kernel already on target major. Resuming from pkg fix.")
+                return Stage.FIX_PKG
+            self.log.info(f"Base/kernel still on {self.base_kernel_major() or 'unknown'} "
+                          f"-- {self.major(target_version)} is available, not started")
 
         return Stage.INIT
 
@@ -1135,9 +1163,10 @@ class OPNsenseUpgrade:
                         self.target = self.sys.query_latest()
                     if self.target:
                         current = self.sys.opnsense_version()
-                        if current and self.sys.major(current) != self.sys.major(self.target):
+                        if self.sys.base_upgraded_ahead(current, self.target):
                             self.log.warning(f"Packages on {self.sys.major(current)} but {self.sys.major(self.target)} available")
-                            self.log.info("Base/kernel likely already upgraded. Resuming from pkg fix.")
+                            self.log.info("Base/kernel already on target major. "
+                                          "Resuming from pkg fix.")
                             detected = Stage.FIX_PKG
                     if detected == Stage.INIT:
                         self.log.info("No incomplete upgrade detected. System is in normal state.")
