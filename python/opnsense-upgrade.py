@@ -465,12 +465,26 @@ class SystemInfo:
                 return exact or ver
         return None
 
+    def _pkg_rquery_version(self):
+        """Query the pkg catalog for the opnsense version, "" if the query failed.
+
+        pkg rquery can segfault a child process while still exiting 0, sometimes
+        printing nothing at all. Empty output therefore means the query broke, not
+        that no version exists — say so, since the caller silently falls back.
+        """
+        out = self.sh.output("pkg rquery '%v' opnsense 2>/dev/null")
+        if not out:
+            self.log.warning("pkg rquery returned no version (query failed, not "
+                             "'no update') -- falling back to pkg search / mirror")
+            return ""
+        return re.sub(r"_\d+$", "", out)
+
     def _probe_mirror_minor(self, current):
         """Check for latest patch version within the current branch."""
         branch = self.major(current)
 
         # Method A: pkg remote query — fast, uses locally cached pkg catalog
-        out = re.sub(r"_\d+$", "", self.sh.output("pkg rquery '%v' opnsense 2>/dev/null"))
+        out = self._pkg_rquery_version()
         if out and out != current and self.major(out) == self.major(current):
             self.log.success(f"Minor update available (pkg): {out}")
             return out
