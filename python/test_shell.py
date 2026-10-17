@@ -3,7 +3,8 @@
 
 Covers Shell.run_tee_output's idle-timeout (kills a command that produces no
 output, the failure that motivated it) and SystemInfo.host_reachable (an HTTP
-error response still means the host is up). Pure stdlib, no network or OPNsense
+error response still means the host is up), and the pkg-origin pre-check (a
+FreeBSD-built pkg blocks a major upgrade). Pure stdlib, no network or OPNsense
 dependencies — runs anywhere:
 
     python3 python/test_shell.py
@@ -100,9 +101,42 @@ def test_host_reachable():
           si.host_reachable(f"http://127.0.0.1:{closed_port}/", timeout=3) is False)
 
 
+def make_upgrader(origin, minor, confirm_answer=False):
+    """OPNsenseUpgrade with a stubbed pkg origin and confirm prompt (no firewall)."""
+    up = mod.OPNsenseUpgrade.__new__(mod.OPNsenseUpgrade)
+    up.log = mod.Logger(tempfile.mkdtemp(prefix="opnsense-test-"), prefix="test")
+    up.minor = minor
+    up.sys = type("FakeSys", (), {"pkg_origin": lambda self: origin})()
+    up.confirm = lambda prompt: confirm_answer
+    return up
+
+
+def test_pkg_origin():
+    # Live 2026-10-16 state: FreeBSD-built pkg made 10-sanity.sh abort the 26.7 upgrade.
+    check("FreeBSD pkg blocks a major upgrade",
+          make_upgrader("FreeBSD", minor=False, confirm_answer=True)._check_pkg_origin()
+          is False)
+    check("FreeBSD pkg on a minor update defers to confirm (yes)",
+          make_upgrader("FreeBSD", minor=True, confirm_answer=True)._check_pkg_origin()
+          is True)
+    check("FreeBSD pkg on a minor update defers to confirm (no)",
+          make_upgrader("FreeBSD", minor=True, confirm_answer=False)._check_pkg_origin()
+          is False)
+    check("other non-OPNsense origin asks instead of blocking a major",
+          make_upgrader("SunnyValley", minor=False, confirm_answer=True)._check_pkg_origin()
+          is True)
+    check("OPNsense origin passes without asking",
+          make_upgrader("OPNsense", minor=False, confirm_answer=False)._check_pkg_origin()
+          is True)
+    # Empty output is a failed pkg query (segfault-with-rc-0), not a verdict: warn, go on.
+    check("failed pkg query does not block",
+          make_upgrader("", minor=False, confirm_answer=False)._check_pkg_origin() is True)
+
+
 if __name__ == "__main__":
     test_timeout()
     test_host_reachable()
+    test_pkg_origin()
     print()
     if _failures:
         print(f"{len(_failures)} test(s) FAILED: {', '.join(_failures)}")
