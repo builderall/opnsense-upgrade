@@ -22,11 +22,14 @@ while a pkg repo is unreachable -- the Zenarmor/SunnyValley incident).
 
 2. **Arm the Monitor.** Use the Monitor tool with:
    - command: `bash <project-root>/.claude/skills/watch-update/watch-update.sh`
-   - timeout_ms: `1500000` (25 min) for a minor update; `3600000` for a major upgrade
-     (also pass `MAX_SECONDS=3300` in the command environment so the script's own
-     give-up deadline stays inside the Monitor timeout)
-   - **Use the major-upgrade values (`3600000` + `MAX_SECONDS=3300`) for ANY batch
-     containing `os-sensei`, even a minor update.** Zenarmor's post-install deadlock (see
+   - timeout_ms: `1500000` (25 min) for a minor update; `1800000` for a major upgrade
+     (also pass `MAX_SECONDS=1750` in the command environment so the script's own
+     give-up deadline stays inside the Monitor timeout). **The Monitor tool caps
+     every watch at 30 min** -- a larger `timeout_ms` is silently clamped -- so a
+     major upgrade (~42 min for 26.1 -> 26.7, most of it the 1.2 GiB download) needs
+     at least one re-arm; see step 2a.
+   - **Use the major-upgrade values (`1800000` + `MAX_SECONDS=1750`, re-armed) for ANY
+     batch containing `os-sensei`, even a minor update.** Zenarmor's post-install deadlock (see
      Recovery below) has burned 5-25 min on its own before the reboot even starts, so 25
      min is not enough. Check the package list from `check_updates` / `run_update` before
      choosing.
@@ -37,6 +40,12 @@ while a pkg repo is unreachable -- the Zenarmor/SunnyValley incident).
    as notifications. One immediate `upgrade_status` call right after triggering is fine
    (it shows the package list and exercises the repo-stall warning path).
 
+2a. **Re-arm on expiry.** When the Monitor reports `expired after 30m`, call
+   `upgrade_status` once, then arm a fresh Monitor with the same command. A new watcher
+   treats `running` and `reboot` as an active run, so re-arming mid-download or just
+   before the reboot drop both work; if the API is already unreachable it starts in
+   the reboot window and reports `BACK ONLINE` when the firewall returns.
+
 3. **Interpret events.**
 
    | Event | Meaning / action |
@@ -45,6 +54,7 @@ while a pkg repo is unreachable -- the Zenarmor/SunnyValley incident).
    | `Firewall BACK ONLINE after reboot -- version: X` | Terminal. Go to step 4. |
    | `Update finished (status=done, ...)` | Terminal, no reboot happened. Go to step 4. |
    | `Update FAILED (status=error)` + log lines | Terminal. Show the log to the user. |
+   | `Update ABORTED (status=done) -- <line>` + log lines | Terminal failure: OPNsense reports an aborted run as `done`. Nothing was applied. Show the log; fix the failing step (e.g. `10-sanity.sh` refusing a FreeBSD-built pkg), run `configctl firmware check` so the update is offered again, retry. |
    | `WARNING: log stalled ... repo is unreachable` | Repo unreachable. See Recovery A. |
    | `WARNING: log has not advanced in Ns` (no repo) | Post-install deadlock. See Recovery B. |
    | `No update run detected within Ns` | Nothing started. Was the trigger successful? |
@@ -102,8 +112,8 @@ post-install to advance to a new step that may park again -- same fix, new pid.
 
 - `watch-update.sh` is a thin launcher; the watcher logic is `watch_update.py`, run from
   `mcp/.venv`. It imports the MCP package directly (`Config`, `OPNsenseAPI`,
-  `_repo_error`), so repo-error detection and config loading have a single source of
-  truth with the MCP server.
+  `_repo_error`, `_run_aborted`), so repo-error and abort detection and config loading
+  have a single source of truth with the MCP server.
 - The script is read-only: it only GETs firmware status endpoints.
 - Credentials come from `mcp/.env` via the MCP package loader (`OPNSENSE_*` environment
   variables override it); the script never prints them.

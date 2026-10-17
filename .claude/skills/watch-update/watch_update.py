@@ -11,10 +11,12 @@ State machine (same as the proven bash original):
   waiting  -- the upgradestatus endpoint retains the previous run's terminal status
               (and reports 'error' with an empty log right after a reboot), so
               terminal statuses at arm time are stale residue. Wait for 'running'
-              or an API drop; give up after NO_RUN_AFTER seconds.
+              (or 'reboot', when re-armed just before the drop) or an API drop;
+              give up after NO_RUN_AFTER seconds.
   watching -- emit stall warnings (with the Zenarmor/SunnyValley unreachable-repo
               signature check), detect the reboot drop (two consecutive failed
-              polls), and exit on back-online / done / error.
+              polls), and exit on back-online / done / error. A 'done' whose log
+              carries an abort marker is reported as ABORTED, not success.
 
 Env knobs: POLL_SECONDS (20), STALL_AFTER (300), MAX_SECONDS (1800),
            NO_RUN_AFTER (90). Credentials come from mcp/.env via the MCP package
@@ -36,7 +38,12 @@ sys.path.insert(0, MCP_DIR)
 import httpx  # noqa: E402  (from the mcp venv)
 from src.opnsense_mcp.api import OPNsenseAPI  # noqa: E402
 from src.opnsense_mcp.config import Config  # noqa: E402
-from src.opnsense_mcp.tools import _repo_error  # noqa: E402
+from src.opnsense_mcp.tools import _repo_error, _run_aborted  # noqa: E402
+
+# upgradestatus values meaning a run is in progress. 'reboot' is set once the
+# kernel is installed and the reboot is imminent -- re-arming there must not
+# wait for a 'running' that will never come (#34).
+ACTIVE_STATUSES = ("running", "reboot")
 
 LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
@@ -120,7 +127,7 @@ def main():
         f"Watching update: initial status='{initial or 'unreachable'}', "
         f"version={fw_version(api)}"
     )
-    if initial == "running":
+    if initial in ACTIVE_STATUSES:
         phase = "watching"
 
     while True:
@@ -146,8 +153,8 @@ def main():
                     down = True
             else:
                 fails = 0
-                if body.get("status") == "running":
-                    emit("Run detected (status=running)")
+                if body.get("status") in ACTIVE_STATUSES:
+                    emit(f"Run detected (status={body.get('status')})")
                     phase = "watching"
                     last_log_change = now
                 elif now - start >= no_run_after:
@@ -174,6 +181,15 @@ def main():
             fails = 0
             fw_status = body.get("status", "")
             if fw_status == "done":
+                log = body.get("log") or ""
+                aborted = _run_aborted(log)
+                if aborted:
+                    # OPNsense reports an aborted run as 'done' (#34).
+                    emit(f"Update ABORTED (status=done) -- {aborted}; last log lines:")
+                    for line in log.strip().splitlines()[-5:]:
+                        emit(line)
+                    status_to_log("FAILED", f"aborted: {aborted}")
+                    return 1
                 ver = fw_version(api)
                 emit(
                     f"Update finished (status=done, no reboot observed) "
