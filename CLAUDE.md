@@ -61,22 +61,27 @@ Rules of thumb:
 ## OPNsense Context
 
 - Firewall hostname: `OPNsense.home.lan` (user's local DNS)
-- Current version: 26.1.11_10 (incrementally updated from 26.1.1 during development)
-- Next major version: 26.7 (confirmed via API `CORE_NEXT` field)
+- Current version: 26.7.7 (major upgrade from 26.1.11_10 via MCP `run_upgrade` on
+  2026-10-17; the "26.7" sets shipped 26.7.7 directly). Earlier: incrementally updated
+  from 26.1.1 during development
+- Next major version: 27.1 (API `CORE_NEXT` field)
 - Version format: YY.M.P (e.g., 26.1.2) with pkg revision suffix `_N` (e.g., 26.1.2_5) — always strip suffix for comparisons
 - Minor updates: within same branch (26.1.1 -> 26.1.2)
 - Major upgrades: across branches (26.1 -> 26.7), require base/kernel upgrade + reboot
 - OPNsense REST API at `/api/core/firmware/` — confirmed working
 - `pkg` can break after base/kernel upgrade due to ABI mismatch — the python script handles this
-- `pkg rquery` segfaults a child process on **every** call on this firewall (seen on
-  26.1.11_10 / pkg 2.6.2_1, issue #20, closed undiagnosed). It usually prints the correct
-  result and *then* segfaults, but a glob pattern (`'os-sensei*'`) returned no output at
-  all — and the exit code stays `0` either way. Root cause unknown; never established
-  whether it is a pkg bug or specific to this box. **Treat empty output from any `pkg`
-  query as a failed query, never as "not found"**, and do not trust `rc` alone. Two places
-  already do: `SystemInfo._pkg_rquery_version()` warns and returns `""`; and
-  `base_upgraded_ahead()` returns False when `pkg query` yields nothing, so a broken pkg
-  refuses to resume rather than guessing.
+- `pkg` segfaulted a child process on **every** call on this firewall (#20, 26.1.x). Root
+  cause found 2026-10-17: installed pkg 2.6.2_1 came from the **FreeBSD** repo
+  (`pkg query '%R' pkg`; installed 2026-04-27, how is unknown -- `FreeBSD.conf` is
+  disabled) instead of OPNsense's 2.3.1_1. Reinstalling with
+  `pkg-static install -fy -r OPNsense pkg` (DB backed up first; the 2.6 -> 2.3 downgrade is
+  safe -- schema 38 vs 36, same major, additive only) stopped the segfaults. The same
+  FreeBSD-origin pkg made OPNsense's `10-sanity.sh` hook abort the first 26.7 upgrade
+  *after* the 1.2 GiB download; the python pre-checks now catch it up front (#31).
+  The defensive rule stays: **treat empty output from any `pkg` query as a failed query,
+  never as "not found"**, and do not trust `rc` alone. `SystemInfo._pkg_rquery_version()`
+  warns and returns `""`; `base_upgraded_ahead()` returns False when `pkg query` yields
+  nothing; `_check_pkg_origin()` warns rather than passes on empty output.
 
 ## GitHub
 
@@ -89,9 +94,9 @@ Rules of thumb:
 
 ## MCP Server
 
-**Status: Live tested via Claude Code sessions — all read tools plus `run_update` exercised
-against the real firewall. Only `run_upgrade`/`reboot` execution remains untested (needs the
-26.7 major release).**
+**Status: Live tested via Claude Code sessions — all read tools, `run_update`, and
+`run_upgrade` (26.1.11_10 -> 26.7.7, 2026-10-17) exercised against the real firewall.
+Only `reboot` execution remains untested.**
 
 ### Structure
 
@@ -161,9 +166,18 @@ Privileges required:
 
 ### Pending MCP Work
 
-1. **Test `run_upgrade` + `reboot`** — guards verified working; actual execution still pending a real major upgrade (26.7 when released). `run_update` is now exercised live (see Completed).
+1. **Test `reboot`** — guard verified; execution untested (every reboot so far was
+   triggered by an update itself). `run_update` and `run_upgrade` are exercised live.
 
 ### Completed MCP Work
+
+- `run_upgrade` exercised live (2026-10-17, 26.1.11_10 -> 26.7.7, ~42 min incl. reboot).
+  The endpoint ignores the POST body (`upgradeAction()` just runs configd
+  `firmware upgrade` -> `opnsense-update -u`), so the `version` argument is cosmetic.
+  First attempt aborted in `10-sanity.sh` (FreeBSD-origin pkg, see OPNsense Context); the
+  aborted run empties `/var/cache/opnsense-update`, so nothing stays staged and the
+  firmware status reads "not yet released" until `configctl firmware check` re-runs.
+- Pending major upgrade reboot flag (#29) — `upgrade_sets` now read by `batch_summary()`.
 
 - Pending-batch reporting (2026-07-12) — `check_updates`/`pre_upgrade_check`/`run_update` now
   list every pending package (name, version change, repo, action) and classify the batch via
