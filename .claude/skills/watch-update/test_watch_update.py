@@ -5,7 +5,9 @@ Covers the paths a live run rarely (or never) exercises: the reboot ride-through
 (drop detected -> back online), done-without-reboot, error with log tail, stall
 warnings (with and without the unreachable-repo signature -- the repo check uses
 the exact _repo_error() the MCP server uses, by import), the give-up deadline,
-and stale-terminal-status-at-arm. No network or firewall needed. Run with:
+stale-terminal-status-at-arm, an aborted run reported as 'done' (_run_aborted(),
+also shared), and re-arming at status 'reboot'. No network or firewall needed.
+Run with:
 
     mcp/.venv/bin/python .claude/skills/watch-update/test_watch_update.py
 """
@@ -118,6 +120,25 @@ os.environ["MAX_SECONDS"] = "30"
 fake = FakeAPI([{"status": "error", "log": ""}], VER)
 rc, out = run_main(fake)
 check("no-run: stale error ignored", "nothing to watch" in out and rc == 0)
+
+# 7. Aborted run reported as 'done' (#34) -- live log tail from the first 26.7 attempt.
+ABORT_LOG = ("Please reboot.\n>>> Invoking upgrade script 'sanity.sh'\n"
+             "The Package manager \"pkg\" is incompatible and needs a reinstall.\n"
+             ">>> Error in upgrade script '10-sanity.sh'\n"
+             "The upgrade was aborted due to an error.\n***DONE***")
+fake = FakeAPI([running, {"status": "done", "log": ABORT_LOG}], VER)
+rc, out = run_main(fake)
+check("abort: reported as ABORTED, not finished",
+      "Update ABORTED" in out and "no reboot observed" not in out)
+check("abort: names the failing step", "10-sanity.sh" in out)
+check("abort: exit 1", rc == 1)
+
+# 8. Re-armed while status is 'reboot' -> watching straight away, rides the drop
+fake = FakeAPI([{"status": "reboot", "log": "x"}, EXC, EXC,
+                {"status": "error", "log": ""}], VER)
+rc, out = run_main(fake)
+check("reboot-at-arm: no 'nothing to watch'", "nothing to watch" not in out)
+check("reboot-at-arm: back online", "BACK ONLINE after reboot" in out and rc == 0)
 
 print("\n" + ("FAILURES: " + ", ".join(failures)
               if failures else "ALL STATE-MACHINE TESTS PASSED"))

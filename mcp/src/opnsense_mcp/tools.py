@@ -97,6 +97,22 @@ def _repo_error(status: dict) -> str | None:
     return None
 
 
+ABORT_MARKERS = ("The upgrade was aborted due to an error", ">>> Error in upgrade script")
+
+
+def _run_aborted(log: str) -> str | None:
+    """Return the first abort line in an upgradestatus log, else None.
+
+    OPNsense reports an aborted run as status 'done': its upgrade.sh prints the
+    abort message, then falls through to output_done. Seen live when 10-sanity.sh
+    refused a FreeBSD-built pkg during the 26.7 upgrade (#34).
+    """
+    for line in (log or "").splitlines():
+        if any(m in line for m in ABORT_MARKERS):
+            return line.strip()
+    return None
+
+
 def _version_state(status: dict) -> dict:
     """Firmware-version fields shared by the update/upgrade/check handlers.
 
@@ -263,6 +279,13 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 if log_lines:
                     lines.append("\nLog (last 20 lines):")
                     lines.extend(log_lines.strip().splitlines()[-20:])
+                aborted = _run_aborted(log_lines)
+                if aborted:
+                    lines.append(
+                        f"\nWARNING: the run was ABORTED ({aborted}) -- status '{fw_status}' "
+                        "does not mean it succeeded. Nothing was applied; check the log above "
+                        "for the failing step, fix it, then retry."
+                    )
                 # A "running" status with an unreachable repo is the classic stall:
                 # pkg blocks on the catalog fetch and the log stops advancing.
                 if fw_status == "running":
