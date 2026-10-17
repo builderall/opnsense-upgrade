@@ -211,8 +211,9 @@ Privileges required:
 
 ## Testing Status (python script)
 
-- **Deployed on firewall:** master with PR #21 and #23, copied to `/root/opnsense-upgrade.py`
-  on 2026-08-17 (md5 `a562ac2c73f56f701c97d29e035d353f`, full firewall suite 7/0). The
+- **Deployed on firewall:** master with PR #32 (pkg-origin pre-check), copied to
+  `/root/opnsense-upgrade.py` on 2026-10-17 on 26.7.7 (md5
+  `d25d1eaa85accb62cb07262590b2e40f`, full firewall suite 7/0). The
   firewall copy does NOT auto-update — redeploy after every merged change to
   `python/opnsense-upgrade.py` via `python/test-on-firewall.sh --deploy` (needs the SSH
   control socket open; the v1.0 copy sat stale on the firewall for months before this was
