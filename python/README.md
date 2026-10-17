@@ -228,7 +228,7 @@ Add `-x` to execute for real. When executing, the script asks for confirmation b
 
 | Stage | Description |
 |-------|-------------|
-| **Pre-checks** | Disk space (2GB min), third-party pkg repo reachability, pkg database validation, lock file + firmware-daemon lock cleanup |
+| **Pre-checks** | Disk space (2GB min), pkg origin (must be the OPNsense repo; a FreeBSD-built pkg blocks a major upgrade), third-party pkg repo reachability, pkg database validation, lock file + firmware-daemon lock cleanup |
 | **Cleanup** | Remove unused packages, clean cache, clear temp files |
 | **Backup** | Save config.xml and package list |
 | **Base/Kernel** | Runs `opnsense-update -bk` — reboots if kernel changed. For major upgrades uses `opnsense-update -ubkf` and always reboots |
@@ -421,8 +421,8 @@ tail -f /var/log/opnsense-upgrades/opnsense-*.log
 ## Tests
 
 **Unit tests** (`test_shell.py`) cover the hang-prevention logic (command
-idle-timeout and repo reachability). Stdlib only — no network or OPNsense
-access required:
+idle-timeout and repo reachability) and the pkg-origin pre-check. Stdlib only —
+no network or OPNsense access required:
 
 ```sh
 python3 python/test_shell.py

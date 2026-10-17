@@ -231,6 +231,14 @@ class SystemInfo:
         ver = parts[1] if len(parts) >= 2 else (parts[0] if parts else "")
         return re.sub(r"_\d+$", "", ver)
 
+    def pkg_origin(self):
+        """Repository pkg itself was installed from, "" if the query failed.
+
+        OPNsense's 10-sanity.sh upgrade hook aborts a major upgrade when this is
+        "FreeBSD" -- only after the sets have been downloaded (#31).
+        """
+        return self.sh.output("pkg-static query '%R' pkg 2>/dev/null")
+
     def freebsd_version(self):
         return self.sh.output("uname -r")
 
@@ -726,6 +734,9 @@ class OPNsenseUpgrade:
             return False
         self.log.success("Disk space check passed")
 
+        if not self._check_pkg_origin():
+            return False
+
         if not self.dry_run:
             unreachable = self.sys.check_third_party_repos()
             if unreachable:
@@ -787,6 +798,34 @@ class OPNsenseUpgrade:
         self.log.success("Pre-checks completed")
         self.save(Stage.CLEANUP)
         return True
+
+    def _check_pkg_origin(self):
+        """Pre-check that pkg came from the OPNsense repo; False stops the run.
+
+        A FreeBSD-built pkg makes OPNsense's 10-sanity.sh abort a major upgrade
+        after the 1.2 GiB set download, and it segfaulted a child on every call
+        (#20). Read-only, so it runs in dry-run too.
+        """
+        origin = self.sys.pkg_origin()
+        if not origin:
+            # Empty pkg output is a failed query, never a pass (see CLAUDE.md).
+            self.log.warning("Could not determine which repository pkg came from "
+                             "(pkg query returned nothing)")
+            return True
+        if origin == "OPNsense":
+            self.log.success("pkg origin check passed (OPNsense repository)")
+            return True
+
+        self.log.warning(f"pkg was installed from the '{origin}' repository, not OPNsense")
+        self.log.warning("Reinstall it from the OPNsense repository:")
+        self.log.warning("  cp -p /var/db/pkg/local.sqlite /root/local.sqlite.bak")
+        self.log.warning("  pkg create -o /root pkg")
+        self.log.warning("  pkg-static install -fy -r OPNsense pkg")
+        if origin == "FreeBSD" and not self.minor:
+            self.log.error("OPNsense refuses a major upgrade with a FreeBSD pkg "
+                           "(10-sanity.sh) -- fix pkg first")
+            return False
+        return self.confirm("Continue anyway?")
 
     def stage_cleanup(self):
         self.log.header(Stage.name(Stage.CLEANUP))
@@ -877,16 +916,18 @@ class OPNsenseUpgrade:
             self.log.success("pkg is working correctly")
         else:
             self.log.warning("pkg is incompatible with new base - reinstalling")
-            if not (self.sh.run_tee("pkg-static install -fy pkg") and self.sh.check("pkg -v")):
+            if not (self.sh.run_tee("pkg-static install -fy -r OPNsense pkg")
+                    and self.sh.check("pkg -v")):
                 self.log.warning("Attempting bootstrap...")
                 if not self.sh.run_tee("opnsense-bootstrap -y"):
                     self.log.error("Bootstrap failed")
                     return False
                 self.log.success("Bootstrap successful")
 
-        # Always force-reinstall pkg after base upgrade to prevent segfaults
+        # Always force-reinstall pkg after base upgrade to prevent segfaults.
+        # Pinned to the OPNsense repo: a FreeBSD-built pkg blocks upgrades (#31).
         self.log.info("Reinstalling pkg to ensure full compatibility...")
-        self.sh.run("pkg-static install -fy pkg")
+        self.sh.run("pkg-static install -fy -r OPNsense pkg")
 
         self.save(Stage.PACKAGES)
         return True
