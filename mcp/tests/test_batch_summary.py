@@ -52,6 +52,26 @@ CORE_BATCH = [
 ]
 
 
+# Live upgrade_sets from the 2026-10-16 firmware status with 26.7 pending, verbatim (#29).
+MAJOR_SETS = [
+    {"name": "packages", "repository": "OPNsense",
+     "current_version": "25.7", "new_version": "26.7"},
+    {"name": "kernel", "repository": "OPNsense",
+     "current_version": "26.1.11", "new_version": "26.7"},
+    {"name": "base", "repository": "OPNsense",
+     "current_version": "26.1.11", "new_version": "26.7"},
+]
+
+
+def make_major_status():
+    status = make_status(current="26.1.11_10", latest="26.1.11", fw_status="upgrade",
+                         upgrade_sets=MAJOR_SETS)
+    status["upgrade_needs_reboot"] = "1"
+    status["status_msg"] = ("There are 3 updates available, total download size is "
+                            "1.2GiB. This update requires a reboot.")
+    return status
+
+
 def fake_api(status):
     api = OPNsenseAPI.__new__(OPNsenseAPI)
     api.firmware_status = lambda: status
@@ -135,6 +155,40 @@ def test_reboot_attribution_core():
     info = fake_api(status).check_needs_reboot()
     assert info["pending_update_reboot"]
     assert "kernel/base/core" in info["explanation"]
+
+
+def test_batch_summary_major_sets():
+    b = batch_summary(make_major_status())
+    assert b["packages"] == []
+    assert [s["name"] for s in b["sets"]] == ["packages", "kernel", "base"]
+    assert b["has_core"]
+    assert b["repos"] == ["OPNsense"]
+
+
+def test_update_lines_major_pending_minor_up_to_date():
+    # Sets must not leak into minor-update reporting.
+    status = make_major_status()
+    lines = _update_lines(_version_state(status), batch_summary(status))
+    assert lines == ["Minor update: up to date"]
+
+
+def test_reboot_major_upgrade_not_required_beforehand():
+    # upgrade_needs_reboot=1 with sets pending describes the upcoming upgrade,
+    # not an outstanding reboot -- must not read as REQUIRED (#29).
+    info = fake_api(make_major_status()).check_needs_reboot()
+    assert info["pending_update_reboot"]
+    assert not info["explanation"].startswith("REQUIRED")
+    assert "major upgrade to 26.7" in info["explanation"]
+
+
+def test_reboot_genuine_without_sets_still_required():
+    # The authoritative upgrade_needs_reboot stage must still fire when nothing is pending.
+    status = make_status(fw_status="none")
+    status["upgrade_needs_reboot"] = "1"
+    api = fake_api(status)
+    api.get_uptime_seconds = lambda: 100
+    info = api.check_needs_reboot()
+    assert info["explanation"].startswith("REQUIRED")
 
 
 if __name__ == "__main__":

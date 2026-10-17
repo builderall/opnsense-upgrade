@@ -25,6 +25,7 @@ import httpx  # noqa: E402  (from the mcp venv)
 from src.opnsense_mcp.api import OPNsenseAPI  # noqa: E402
 from src.opnsense_mcp.config import Config  # noqa: E402
 from src.opnsense_mcp.tools import (  # noqa: E402
+    _package_lines,
     _repo_error,
     _update_lines,
     _version_state,
@@ -43,6 +44,7 @@ def report(api):
 
     if vs["fw_status"] == "upgrade":
         lines.append(f"Major upgrade available: {vs['next_major']}")
+        lines.extend(_package_lines({"packages": batch["sets"]}))
     elif vs["next_major"]:
         lines.append(f"Next major version: {vs['next_major']} (planned)")
     else:

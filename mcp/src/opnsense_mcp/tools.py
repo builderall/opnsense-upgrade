@@ -225,11 +225,13 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                 fw_status = vs["fw_status"]
                 status_msg = status.get("status_msg", "")
 
+                batch = batch_summary(status)
                 lines = [f"Current version: {current}"]
-                lines.extend(_update_lines(vs, batch_summary(status)))
+                lines.extend(_update_lines(vs, batch))
 
                 if fw_status == "upgrade":
                     lines.append(f"Major upgrade available: {next_major} (use run_upgrade to upgrade)")
+                    lines.extend(_package_lines({"packages": batch["sets"]}))
                 elif next_major:
                     lines.append(f"Next major version: {next_major} (planned, not yet released)")
                 else:
@@ -478,6 +480,7 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                         lines.append(f"Major upgrade:   {next_major} -- available but blocked by pending minor update")
                     else:
                         lines.append(f"Major upgrade:   {next_major} -- available and ready")
+                    lines.extend(_package_lines({"packages": batch["sets"]}))
                 elif next_major:
                     lines.append(f"Major upgrade:   {next_major} -- planned, not yet released on mirror")
                 else:
