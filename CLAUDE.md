@@ -65,6 +65,15 @@ Rules of thumb:
   2026-10-17; the "26.7" sets shipped 26.7.7 directly). Earlier: incrementally updated
   from 26.1.1 during development
 - Next major version: 27.1 (API `CORE_NEXT` field)
+- Firewall rules migrated to the 26.7 MVC rules page on 2026-10-17 via Firewall >
+  Migration (export CSV -> import -> remove legacy); no legacy rules remain and the
+  `os-firewall-legacy` plugin is not installed. The LAN "Blacklist ProofPoint ET Out"
+  rule had been `direction: out` since at least 2026-04 and never matched; fixed to `in`
+  during the migration.
+- IPv6 is set to None on LAN and WAN (2026-10-17). The ISP answers no DHCPv6 on WAN,
+  but LAN tracked WAN, so radvd advertised a default route with no upstream; clients
+  tried IPv6 first and default deny dropped it (~20-50k/day), stalling IPv6-heavy sites
+  such as CNN. Re-enable only after confirming WAN receives a delegated prefix.
 - Version format: YY.M.P (e.g., 26.1.2) with pkg revision suffix `_N` (e.g., 26.1.2_5) — always strip suffix for comparisons
 - Minor updates: within same branch (26.1.1 -> 26.1.2)
 - Major upgrades: across branches (26.1 -> 26.7), require base/kernel upgrade + reboot
@@ -108,7 +117,9 @@ mcp/
 ├── pyproject.toml
 ├── SETUP.md                      # user setup guide
 ├── tests/
-│   └── test_batch_summary.py     # pending-batch reporting tests (no network; run via .venv)
+│   ├── test_batch_summary.py     # pending-batch reporting tests (no network; run via .venv)
+│   ├── test_run_aborted.py       # aborted-run detection (status 'done' + abort log)
+│   └── test_pkg_origin.py        # pre_upgrade_check pkg-origin check
 └── src/opnsense_mcp/
     ├── config.py                 # loads mcp/.env, pydantic Config model
     ├── api.py                    # OPNsenseAPI class — HTTP calls, reboot staleness, batch_summary()
@@ -171,6 +182,14 @@ Privileges required:
 
 ### Completed MCP Work
 
+- Aborted-run detection (#34) — OPNsense reports an aborted firmware run as status
+  `done`; shared `_run_aborted()` in `tools.py` reads the abort markers from the log.
+  `upgrade_status` warns, and the watch-update watcher reports `Update ABORTED` (exit 1,
+  FAILED) instead of logging SUCCESS as it did for the first 26.7 attempt.
+- `pre_upgrade_check` pkg origin (#36) — reads `repository` for `pkg` from
+  `firmware_info()`; a FreeBSD-built pkg with a major upgrade pending is a NOT-READY
+  issue (10-sanity.sh would abort it after the download). `run_upgrade`'s `version`
+  argument is documented as informational.
 - `run_upgrade` exercised live (2026-10-17, 26.1.11_10 -> 26.7.7, ~42 min incl. reboot).
   The endpoint ignores the POST body (`upgradeAction()` just runs configd
   `firmware upgrade` -> `opnsense-update -u`), so the `version` argument is cosmetic.

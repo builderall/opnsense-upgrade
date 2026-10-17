@@ -57,7 +57,13 @@ TOOLS = [
         inputSchema={
             "type": "object",
             "properties": {
-                "version": {"type": "string", "description": "Target version, e.g. '26.7'. Leave empty to auto-detect."},
+                "version": {
+                    "type": "string",
+                    "description": (
+                        "Informational only: OPNsense ignores it and always upgrades to the "
+                        "advertised next major (check_updates shows which). Optional."
+                    ),
+                },
             },
             "required": [],
         },
@@ -111,6 +117,30 @@ def _run_aborted(log: str) -> str | None:
         if any(m in line for m in ABORT_MARKERS):
             return line.strip()
     return None
+
+
+def _pkg_origin_check(info: dict, major_pending: bool) -> tuple[str, str | None]:
+    """(report line, NOT-READY issue or None) for the repository pkg came from.
+
+    OPNsense's 10-sanity.sh refuses a major upgrade when pkg is FreeBSD-built --
+    but only after the sets are downloaded (30 min for 26.7). firmware_info()
+    already carries each package's repository, so check it up front (#36).
+    """
+    pkg = next((p for p in info.get("package", [])
+                if p.get("name") == "pkg" and p.get("installed") == "1"), None)
+    origin = (pkg or {}).get("repository", "")
+    if not origin:
+        return "Pkg origin:      unknown (pkg not found in package list)", None
+    if origin == "OPNsense":
+        return "Pkg origin:      OPNsense", None
+    line = f"Pkg origin:      {origin} -- NOT the OPNsense repository"
+    if origin == "FreeBSD" and major_pending:
+        return line, (
+            "pkg was installed from the FreeBSD repository; OPNsense aborts a major "
+            "upgrade over this (10-sanity.sh) after the download. Over SSH: back up "
+            "/var/db/pkg/local.sqlite, then pkg-static install -fy -r OPNsense pkg."
+        )
+    return line, None
 
 
 def _version_state(status: dict) -> dict:
@@ -547,8 +577,13 @@ def register_tools(server: Server, config: Config) -> OPNsenseAPI:
                         issues.append(f"Obsolete Python 3.7 packages installed: {', '.join(py37_pkgs[:5])}{'...' if len(py37_pkgs) > 5 else ''}. Remove via SSH before upgrading.")
                     else:
                         lines.append("Obsolete py37:   none found")
+                    origin_line, origin_issue = _pkg_origin_check(info, fw_status == "upgrade")
+                    lines.append(origin_line)
+                    if origin_issue:
+                        issues.append(origin_issue)
                 except Exception:
                     lines.append("Obsolete py37:   check unavailable")
+                    lines.append("Pkg origin:      check unavailable")
 
                 # Verdict
                 lines.append("")
