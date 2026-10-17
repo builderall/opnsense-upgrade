@@ -19,13 +19,29 @@ def batch_summary(status: dict[str, Any]) -> dict[str, Any]:
 
     Returns dict with:
       packages: [{action, name, current_version, new_version, repository}, ...]
-      has_core: True when the batch includes base, kernel, or an opnsense* package
+      sets:     pending major-upgrade sets (packages/kernel/base), same shape
+      has_core: True when the batch includes base, kernel, an opnsense* package,
+                or any major-upgrade set
       repos:    sorted unique repository names in the batch
 
     A batch with has_core=False is plugin-only (e.g. a SunnyValley/Zenarmor
     release): the OPNsense version does not change, and any needs_reboot flag
     is requested by the plugin, not by a kernel/base update.
+
+    A pending major upgrade lists its work in upgrade_sets, not upgrade_packages.
+    Sets are kept apart from packages so minor-update reporting (keyed on
+    packages) is unaffected; observed live with 26.7 pending, 2026-10-16 (#29).
     """
+    sets = [
+        {
+            "action": "upgrade",
+            "name": s.get("name", "?"),
+            "current_version": s.get("current_version", ""),
+            "new_version": s.get("new_version", ""),
+            "repository": s.get("repository", ""),
+        }
+        for s in status.get("upgrade_sets") or []
+    ]
     packages = []
     for action, key in (
         ("upgrade", "upgrade_packages"),
@@ -42,12 +58,12 @@ def batch_summary(status: dict[str, Any]) -> dict[str, Any]:
                 "new_version": p.get("new_version", ""),
                 "repository": p.get("repository", ""),
             })
-    has_core = any(
+    has_core = bool(sets) or any(
         p["name"] in CORE_PACKAGE_NAMES or p["name"].startswith(CORE_PACKAGE_PREFIX)
         for p in packages
     )
-    repos = sorted({p["repository"] for p in packages if p["repository"]})
-    return {"packages": packages, "has_core": has_core, "repos": repos}
+    repos = sorted({p["repository"] for p in packages + sets if p["repository"]})
+    return {"packages": packages, "sets": sets, "has_core": has_core, "repos": repos}
 
 
 class OPNsenseAPI:
@@ -157,7 +173,7 @@ class OPNsenseAPI:
             return {"needs_reboot": False, "is_stale": False, "explanation": "No reboot required."}
 
         batch = batch_summary(status)
-        pending_packages = bool(batch["packages"])
+        pending_packages = bool(batch["packages"] or batch["sets"])
 
         # With a pending update/upgrade batch, needs_reboot describes the *upcoming*
         # run ("applying this will reboot the system") — not an outstanding reboot.
@@ -167,7 +183,11 @@ class OPNsenseAPI:
         # 2.6.1, whose engine reloads kernel modules) — attribute it correctly so
         # it does not read as a kernel/base update.
         if pending_packages and status.get("status") in ("update", "upgrade"):
-            if batch["has_core"]:
+            if batch["sets"]:
+                target = batch["sets"][0]["new_version"] or "next major"
+                names = "/".join(s["name"] for s in batch["sets"])
+                cause = f"major upgrade to {target}: {names} sets"
+            elif batch["has_core"]:
                 cause = "kernel/base/core packages in the batch"
             else:
                 names = ", ".join(p["name"] for p in batch["packages"][:5])
